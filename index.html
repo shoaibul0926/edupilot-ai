@@ -442,6 +442,7 @@ const SK = {
   assignments:'edupilot_assignments', submissions:'edupilot_submissions',
   library:'edupilot_library', chat:'edupilot_chat_',
   generatedAssignments:'edupilot_generatedAssignments',
+  evalBackendUrl:'edupilot_evalBackendUrl',
 };
 function load(key, fallback){
   try{
@@ -601,6 +602,7 @@ function migrateSubmissionSchema(){
     const merged = {
       board:a?a.board:null, class:a?a.class:null, subject:a?a.subject:null, lectureId:a?a.lectureId:null,
       imageMeta:[], reviewReason:null, updatedAt:s.submittedAt||new Date().toISOString(),
+      evaluation:{ocr:null, grading:null, review:null, auditTrail:[]},
       ...s,
     };
     if(merged.status === 'Pending Review'){ merged.status = 'Awaiting Evaluation'; changed = true; }
@@ -2070,6 +2072,209 @@ function renderCreateThumbs(){
 }
 
 /* ========================================================================
+   AI EVALUATION (Phase 5)
+
+   This app is a single static HTML file with no server and nowhere safe to
+   hold an OCR/vision AI provider's API key — putting one in this file would
+   expose it to anyone who views source. Real OCR + AI grading therefore has
+   to live behind a backend you deploy and control (see EVALUATION_BACKEND.md
+   for the exact contract and security requirements). AIEvaluationService
+   below makes a REAL network call to that backend's URL (configured on the
+   Settings page); if none is configured, or it can't be reached, it reports
+   that honestly rather than fabricating a result and calling it "AI output."
+   Every attempt — success or failure — is appended to the submission's
+   audit trail, and a successful response always lands in teacher review
+   before anything is treated as a final mark.
+======================================================================== */
+function buildEvaluationPayload(submission, genAssignment, band){
+  return {
+    submissionId: submission.id,
+    assignmentId: submission.assignmentId,
+    board: submission.board, class: submission.class, subject: submission.subject,
+    expectedLevel: {label:band.label, style:band.style, answerLength:band.answerLength},
+    questions: genAssignment.questions.map(q=>({
+      id:q.id, type:q.type, text:q.text, options:q.options||null, correctIndex: q.correctIndex!=null?q.correctIndex:null,
+      suggestedAnswer:q.suggestedAnswer, markingScheme:q.markingScheme, marks:q.marks, topicTag:q.topicTag,
+    })),
+  };
+}
+
+function appendAuditEntry(submission, action, details){
+  submission.evaluation = submission.evaluation || {ocr:null, grading:null, review:null, auditTrail:[]};
+  submission.evaluation.auditTrail = submission.evaluation.auditTrail || [];
+  submission.evaluation.auditTrail.push({at:new Date().toISOString(), actor:'teacher', action, details});
+}
+
+const AIEvaluationService = {
+  isConfigured(){ return !!(load(SK.evalBackendUrl,'')||'').trim(); },
+  /* Real network call — never a local mock. images come from SubmissionImageStore
+     (in-memory object URLs for this session); they are fetched back into Blobs
+     and sent as multipart/form-data alongside the JSON payload. */
+  async evaluateSubmission(submission, genAssignment, band){
+    const endpoint = (load(SK.evalBackendUrl,'')||'').trim();
+    if(!endpoint) return {ok:false, errorCode:'NOT_CONFIGURED', message:'No AI evaluation backend is configured. Add one on the Settings page — see EVALUATION_BACKEND.md for the required contract.'};
+    const images = SubmissionImageStore[submission.id] || [];
+    if(!images.length) return {ok:false, errorCode:'NO_IMAGES', message:'The original images for this submission are not available in this browser session, so there is nothing to send for evaluation.'};
+    try{
+      const fd = new FormData();
+      fd.append('payload', JSON.stringify(buildEvaluationPayload(submission, genAssignment, band)));
+      for(const img of images){
+        const blob = await fetch(img.url).then(r=>r.blob());
+        fd.append('images', blob, img.name);
+      }
+      const res = await fetch(endpoint, {method:'POST', body:fd});
+      if(!res.ok){
+        const text = await res.text().catch(()=>'');
+        return {ok:false, errorCode:'BACKEND_ERROR', message:`Evaluation backend returned HTTP ${res.status}.${text?' '+text:''}`};
+      }
+      const data = await res.json();
+      return {ok:true, data};
+    } catch(err){
+      return {ok:false, errorCode:'NETWORK_ERROR', message:'Could not reach the evaluation backend: '+(err&&err.message?err.message:'unknown error')};
+    }
+  },
+};
+
+const AIEvalModal = { submissionId:null, loading:false, result:null, error:null };
+
+function findApprovedQuestionSet(assignmentId){
+  return load(SK.generatedAssignments, []).find(g=>g.linkedAssignmentId===assignmentId && (g.status==='Approved' || g.status==='Published'));
+}
+
+function openAIEvaluationModal(submissionId){
+  AIEvalModal.submissionId = submissionId; AIEvalModal.loading = false; AIEvalModal.result = null; AIEvalModal.error = null;
+  renderAIEvalModal();
+}
+
+function renderAIEvalModal(){
+  const submissions = load(SK.submissions, []);
+  const s = submissions.find(x=>x.id===AIEvalModal.submissionId);
+  if(!s){ closeModal(); return; }
+  const assignment = load(SK.assignments, []).find(a=>a.id===s.assignmentId);
+  const genAssignment = findApprovedQuestionSet(s.assignmentId);
+
+  const mismatch = assignment && (assignment.board!==s.board || String(assignment.class)!==String(s.class) || assignment.subject!==s.subject);
+  const images = SubmissionImageStore[s.id] || [];
+
+  let body;
+  if(AIEvalModal.result){
+    body = renderAIEvalResult(s, genAssignment);
+  } else if(AIEvalModal.loading){
+    body = `<p class="hint">Sending images and the approved question set to the configured evaluation backend...</p>`;
+  } else if(!assignment){
+    body = `<div class="info-banner">${ico('shield')}<div>The assignment linked to this submission could not be found.</div></div>`;
+  } else if(mismatch){
+    body = `<div class="info-banner">${ico('shield')}<div>This submission's recorded board/class/subject no longer matches the assignment's current board/class/subject. Resolve this mismatch before running AI evaluation.</div></div>`;
+  } else if(!genAssignment){
+    body = `<div class="info-banner">${ico('shield')}<div>No teacher-approved question set was found for this assignment. Generate and approve one on the <b>Assignment Generator</b> page first — AI evaluation compares answers against that approved answer key and marking scheme, not a fresh guess.</div></div>`;
+  } else if(!images.length){
+    body = `<div class="info-banner">${ico('shield')}<div>The original images for this submission are not available in this browser session (they are kept in memory only, per Phase 4). Evaluation needs the images — re-open this within the session they were uploaded, or use manual evaluation instead.</div></div>`;
+  } else if(AIEvalModal.error){
+    body = `<div class="info-banner">${ico('shield')}<div><b>Evaluation did not run (${escapeHtml(AIEvalModal.error.errorCode)}).</b> ${escapeHtml(AIEvalModal.error.message)}</div></div>
+      <p class="hint">No marks were generated or guessed — nothing here has been treated as a result. Use manual evaluation instead, or fix the backend and try again.</p>`;
+  } else {
+    const band = getClassBand(s.class);
+    body = `
+      <p>${escapeHtml(s.studentName)} &middot; ${boardLabel(s.board)} · Class ${s.class} · ${escapeHtml(s.subject)}</p>
+      <p class="hint">Confirm these match the ${images.length} uploaded photo${images.length===1?'':'s'} before continuing. This will send them to your configured evaluation backend (${AIEvaluationService.isConfigured()?'configured':'not configured'}) along with the approved question set "${escapeHtml(genAssignment.title)}" (${genAssignment.questions.length} questions).</p>
+      <div class="img-thumb-grid">${images.map(img=>`<div class="img-thumb"><img src="${img.url}" alt="${escapeHtml(img.name)}"><span class="img-name">${escapeHtml(img.name)}</span></div>`).join('')}</div>`;
+  }
+
+  const canRun = assignment && !mismatch && genAssignment && images.length && !AIEvalModal.loading && !AIEvalModal.result;
+  openModalHtml(`
+    <h3>AI Evaluation <span class="demo-label">Phase 5</span></h3>
+    ${body}
+    <div class="modal-actions" style="margin-top:16px;">
+      <button type="button" class="btn" data-action="modal-close">Close</button>
+      ${canRun?`<button type="button" class="btn btn-primary" id="ai-eval-run-btn">Run AI Evaluation</button>`:''}
+    </div>`, true);
+
+  if(canRun){
+    $('#ai-eval-run-btn').addEventListener('click', async function(){
+      AIEvalModal.loading = true; renderAIEvalModal();
+      const band = getClassBand(s.class);
+      const result = await AIEvaluationService.evaluateSubmission(s, genAssignment, band);
+      const all = load(SK.submissions, []);
+      const rec = all.find(x=>x.id===s.id);
+      if(rec){
+        if(result.ok){
+          appendAuditEntry(rec, 'ai_evaluation_received', `Backend returned a result for ${genAssignment.questions.length} questions.`);
+        } else {
+          appendAuditEntry(rec, 'ai_evaluation_failed', `${result.errorCode}: ${result.message}`);
+        }
+        save(SK.submissions, all);
+      }
+      AIEvalModal.loading = false;
+      if(result.ok){ AIEvalModal.result = result.data; } else { AIEvalModal.error = result; }
+      renderAIEvalModal();
+    });
+  }
+
+  if(AIEvalModal.result){
+    $('#ai-eval-approve-btn').addEventListener('click', function(){
+      const all = load(SK.submissions, []);
+      const rec = all.find(x=>x.id===s.id); if(!rec) return;
+      const teacherEditedText = {}, teacherMarks = {};
+      let total = 0, maxTotal = 0;
+      genAssignment.questions.forEach(q=>{
+        const textEl = document.querySelector(`.ai-q-text[data-id="${q.id}"]`);
+        const marksEl = document.querySelector(`.ai-q-marks[data-id="${q.id}"]`);
+        teacherEditedText[q.id] = textEl ? textEl.value : '';
+        const marks = marksEl ? Math.max(0, Math.min(q.marks, Number(marksEl.value)||0)) : 0;
+        teacherMarks[q.id] = marks;
+        total += marks; maxTotal += q.marks;
+      });
+      const percent = maxTotal ? Math.round((total/maxTotal)*100) : 0;
+      const graded = (AIEvalModal.result.grading && AIEvalModal.result.grading.questionResults) || [];
+      const feedback = genAssignment.questions.map((q,idx)=>{
+        const g = graded.find(x=>x.questionId===q.id);
+        return `Q${idx+1} (${teacherMarks[q.id]}/${q.marks}): ${g&&g.reasoning?g.reasoning:'Reviewed and approved by teacher.'}`;
+      }).join('\n');
+      rec.evaluation = rec.evaluation || {ocr:null, grading:null, review:null, auditTrail:[]};
+      rec.evaluation.ocr = AIEvalModal.result.ocr || null;
+      rec.evaluation.grading = AIEvalModal.result.grading || null;
+      rec.evaluation.review = {teacherEditedText, teacherMarks, approved:true, approvedAt:new Date().toISOString(), approvedBy:State.role};
+      appendAuditEntry(rec, 'teacher_approved_evaluation', `Final score ${percent}% (${total}/${maxTotal} marks) after review.`);
+      rec.status = 'Evaluated'; rec.score = percent; rec.feedback = feedback; rec.updatedAt = new Date().toISOString();
+      save(SK.submissions, all);
+      closeModal();
+      toast('AI evaluation reviewed and approved.','success');
+      renderSubmissionTable();
+    });
+  }
+}
+
+/* Renders the teacher-review step for a successful backend response. Nothing
+   here is final until the teacher explicitly approves it — per-question text
+   and marks are editable right up to that point. */
+function renderAIEvalResult(submission, genAssignment){
+  const grading = AIEvalModal.result.grading || {questionResults:[]};
+  const ocr = AIEvalModal.result.ocr || {extractedText:[]};
+  const rows = genAssignment.questions.map(q=>{
+    const extracted = (ocr.extractedText||[]).find(e=>e.questionId===q.id);
+    const graded = (grading.questionResults||[]).find(g=>g.questionId===q.id);
+    const flags = (graded && graded.flags) || [];
+    return `<div class="card" style="background:var(--bg);margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+        <b style="font-size:13px;">${escapeHtml(q.text)}</b>
+        <span class="meta-chip">Marks: <input type="number" class="ai-q-marks" data-id="${q.id}" min="0" max="${q.marks}" value="${graded?graded.suggestedMarks:0}" style="width:46px;border:none;background:transparent;font-weight:650;padding:0;"> / ${q.marks}</span>
+      </div>
+      ${flags.length?`<div class="badge-row" style="margin-bottom:8px;">${flags.map(f=>`<span class="pill pill-overdue">${escapeHtml(f)}</span>`).join('')}</div>`:''}
+      <div class="field"><label>Extracted Answer (editable)</label><textarea class="ai-q-text" data-id="${q.id}">${escapeHtml(extracted?extracted.text:'')}</textarea></div>
+      ${extracted&&extracted.confidence!=null?`<p class="hint">OCR confidence: ${Math.round(extracted.confidence*100)}%</p>`:''}
+      ${graded?`<p class="hint"><b>AI reasoning:</b> ${escapeHtml(graded.reasoning||'')}</p>`:''}
+      ${graded&&graded.misconceptions&&graded.misconceptions.length?`<p class="hint"><b>Misconceptions:</b> ${graded.misconceptions.map(escapeHtml).join('; ')}</p>`:''}
+    </div>`;
+  }).join('');
+  return `
+    <p class="hint">Review and correct every question below before approving. Nothing is saved as a final mark until you click Approve.</p>
+    <div id="ai-eval-questions">${rows}</div>
+    <div class="modal-actions" style="justify-content:flex-start;margin-top:0;">
+      <button type="button" class="btn btn-primary" id="ai-eval-approve-btn">Approve &amp; Finalize</button>
+    </div>`;
+}
+
+/* ========================================================================
    SUBMISSIONS
 ======================================================================== */
 VIEWS.submissions = function(){
@@ -2142,12 +2347,15 @@ function renderSubmissionTable(){
     ${subs.map(s=>{
       const a = assignments.find(x=>x.id===s.assignmentId);
       const imgCount = (s.imageMeta||[]).length;
-      let actionBtn = '';
+      let actionBtn = '', aiBtn = '';
       if(canEvaluate){
         if(s.status==='Evaluated') actionBtn = `<button class="btn btn-sm" data-action="sub-eval" data-id="${s.id}">Edit Feedback</button>`;
         else if(s.status==='Awaiting Evaluation') actionBtn = `<button class="btn btn-sm" data-action="sub-eval" data-id="${s.id}">Evaluate</button>`;
         else if(s.status==='Uploaded') actionBtn = `<button class="btn btn-sm" data-action="sub-ready" data-id="${s.id}">Mark Ready</button>`;
         else if(s.status==='Needs Teacher Review') actionBtn = `<button class="btn btn-sm" data-action="sub-resolve" data-id="${s.id}">Resolve</button>`;
+        if(s.status==='Awaiting Evaluation' || s.status==='Needs Teacher Review'){
+          aiBtn = `<button class="btn btn-sm" data-action="sub-ai-eval" data-id="${s.id}">AI Evaluate</button>`;
+        }
       }
       return `<tr>
         <td>${escapeHtml(s.studentName)}</td><td>${a?escapeHtml(a.title):'—'}</td><td>${fmtDate(s.submittedAt)}</td>
@@ -2156,6 +2364,7 @@ function renderSubmissionTable(){
         <td>${s.score!=null ? s.score+'%' : '—'}</td>
         <td class="row-actions">
           <button class="btn btn-sm" data-action="sub-view" data-id="${s.id}">View</button>
+          ${aiBtn}
           ${actionBtn}
         </td>
       </tr>`;
@@ -2260,6 +2469,7 @@ PAGE_INIT.submissions = function(){
 
     if(btn.dataset.action==='sub-view'){
       const images = SubmissionImageStore[id];
+      const audit = (s.evaluation && s.evaluation.auditTrail) || [];
       openModalHtml(`
         <h3>Submission Details</h3>
         <p>${escapeHtml(s.studentName)} &middot; ${boardLabel(s.board)} · Class ${s.class||''} · ${escapeHtml(s.subject||'')}</p>
@@ -2267,7 +2477,15 @@ PAGE_INIT.submissions = function(){
         ${images && images.length
           ? `<div class="img-thumb-grid">${images.map(img=>`<a href="${img.url}" target="_blank" rel="noopener" class="img-thumb" title="Open full size"><img src="${img.url}" alt="${escapeHtml(img.name)}"><span class="img-name">${escapeHtml(img.name)}</span></a>`).join('')}</div>`
           : `<div class="info-banner">${ico('shield')}<div>${(s.imageMeta||[]).length} file(s) were attached (${(s.imageMeta||[]).map(m=>escapeHtml(m.name)).join(', ')||'none'}), but the original images were only kept in memory for this browser session and are no longer available after a reload. In the real product these would be stored securely on the server and remain viewable at any time.</div></div>`}
+        ${audit.length?`<div style="margin-top:14px;"><b style="font-size:12.5px;">Evaluation Audit Trail</b>
+          <div class="table-wrap" style="margin-top:6px;"><table><thead><tr><th>When</th><th>Action</th><th>Details</th></tr></thead><tbody>
+            ${audit.slice().reverse().map(e=>`<tr><td style="white-space:nowrap;">${fmtDate(e.at)}</td><td>${escapeHtml(e.action)}</td><td>${escapeHtml(e.details||'')}</td></tr>`).join('')}
+          </tbody></table></div></div>`:''}
         <div class="modal-actions" style="margin-top:16px;"><button type="button" class="btn" data-action="modal-close">Close</button></div>`, true);
+    }
+
+    if(btn.dataset.action==='sub-ai-eval'){
+      openAIEvaluationModal(id);
     }
 
     if(btn.dataset.action==='sub-ready'){
@@ -2560,13 +2778,25 @@ VIEWS.settings = function(){
     </div>
 
     <div class="card" style="margin-top:20px;">
-      <div class="card-head"><h3>Phase 1 Limitations</h3></div>
+      <div class="card-head"><h3>AI Evaluation Backend <span class="demo-label">Phase 5</span></h3></div>
+      <p class="hint" style="margin-bottom:12px;">Real OCR and AI evaluation of handwritten submissions requires a backend server you control, holding your own OCR/vision AI provider credentials — this demo never stores or sends any API key from the browser. Point this at your backend's endpoint once you have one running; see <code>EVALUATION_BACKEND.md</code> in the project for the exact request/response contract and security requirements.</p>
+      <div class="field">
+        <label>Evaluation Backend URL</label>
+        <input type="url" id="settings-eval-endpoint" placeholder="https://your-backend.example.com/api/ai/evaluate-submission" value="${escapeHtml(load(SK.evalBackendUrl,''))}">
+      </div>
+      <p class="hint" id="settings-eval-status" style="margin-bottom:12px;"></p>
+      <button class="btn btn-primary" id="settings-eval-save">Save Backend URL</button>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <div class="card-head"><h3>Limitations</h3></div>
       <ul style="margin:0;padding-left:18px;color:var(--text-600);font-size:13px;line-height:1.8;">
         <li>Role switching is a demo selector, not secure authentication.</li>
         <li>All lectures, assignments, submissions, scores and feedback are sample or manually entered demo data.</li>
         <li>The AI Doubt Solver returns predefined sample answers, not live AI output.</li>
         <li>Curriculum chapters and topics are illustrative and have not been verified against official syllabi.</li>
-        <li>Image uploads are previewed locally in the browser only and are never stored or transmitted.</li>
+        <li>Image uploads are previewed locally in the browser only and are never stored or transmitted, unless you configure a real evaluation backend above.</li>
+        <li>AI evaluation of handwritten submissions (Phase 5) only runs against a backend you configure and deploy yourself; without one, evaluation attempts fail honestly rather than producing fabricated results.</li>
         <li>All data is stored in this browser's localStorage and is not shared between devices.</li>
       </ul>
     </div>`;
@@ -2590,9 +2820,24 @@ PAGE_INIT.settings = function(){
     confirmAction('Reset all demo data?','This clears all demo lectures, assignments, submissions and reference entries, then reloads the sample dataset. This cannot be undone.', ()=>{
       Object.values(SK).forEach(k=>{ if(typeof k==='string') localStorage.removeItem(k); });
       seedData();
+      migrateLectureSchema();
+      migrateSubmissionSchema();
       toast('Demo data reset.','success');
       navigate('overview');
     }, true);
+  });
+
+  const statusEl = $('#settings-eval-status');
+  const refreshEvalStatus = ()=>{
+    const url = load(SK.evalBackendUrl,'');
+    statusEl.textContent = url ? `Configured: ${url}` : 'Not configured — AI evaluation will report this honestly instead of producing results.';
+  };
+  refreshEvalStatus();
+  $('#settings-eval-save').addEventListener('click', function(){
+    const val = $('#settings-eval-endpoint').value.trim();
+    save(SK.evalBackendUrl, val);
+    refreshEvalStatus();
+    toast(val?'Evaluation backend URL saved.':'Evaluation backend cleared.','success');
   });
 };
 
