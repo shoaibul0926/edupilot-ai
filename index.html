@@ -1,0 +1,1592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EduPilot AI — Phase 1 Demo</title>
+<style>
+/* ---------- Reset & tokens ---------- */
+*,*::before,*::after{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+:root{
+  --navy-900:#0b1324;
+  --navy-800:#121a33;
+  --indigo-600:#4338ca;
+  --indigo-500:#4f46e5;
+  --indigo-400:#6366f1;
+  --indigo-50:#eef0ff;
+  --bg:#f4f6fb;
+  --surface:#ffffff;
+  --border:#e2e6f0;
+  --border-strong:#c7cde0;
+  --text-900:#131a2c;
+  --text-600:#4b5468;
+  --text-400:#8a91a6;
+  --success:#15803d;
+  --success-bg:#e8f6ec;
+  --warning:#b45309;
+  --warning-bg:#fef3dd;
+  --danger:#b91c1c;
+  --danger-bg:#fde8e8;
+  --info:#0369a1;
+  --info-bg:#e5f3fb;
+  --radius:10px;
+  --radius-sm:6px;
+  --shadow-sm:0 1px 2px rgba(15,23,42,.06);
+  --shadow-md:0 4px 14px rgba(15,23,42,.08);
+  --sidebar-w:248px;
+  --sidebar-w-collapsed:72px;
+  --topbar-h:60px;
+}
+body{
+  font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+  background:var(--bg);
+  color:var(--text-900);
+  font-size:14.5px;
+  line-height:1.5;
+}
+h1,h2,h3,h4{margin:0 0 4px;font-weight:650;color:var(--text-900);}
+p{margin:0;}
+button{font-family:inherit;}
+a{color:var(--indigo-600);text-decoration:none;}
+a:hover{text-decoration:underline;}
+.icon svg{width:1em;height:1em;display:block;}
+.icon{display:inline-flex;width:18px;height:18px;flex:0 0 auto;}
+
+/* ---------- Role gate ---------- */
+#role-gate{
+  position:fixed;inset:0;background:linear-gradient(135deg,var(--navy-900),var(--indigo-600));
+  display:flex;align-items:center;justify-content:center;z-index:500;padding:20px;
+}
+.role-card{
+  background:var(--surface);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.35);
+  padding:40px 36px;max-width:560px;width:100%;
+}
+.role-card .brand{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+.role-card .brand .mark{
+  width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,var(--indigo-500),var(--indigo-600));
+  display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;
+}
+.role-card .brand .name{font-size:19px;font-weight:700;}
+.role-card .subtitle{color:var(--text-600);margin-bottom:24px;font-size:13.5px;}
+.role-options{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px;}
+.role-opt{
+  border:1.5px solid var(--border);border-radius:var(--radius);padding:18px 10px;text-align:center;
+  cursor:pointer;background:#fff;transition:.15s;
+}
+.role-opt:hover{border-color:var(--indigo-400);box-shadow:var(--shadow-sm);}
+.role-opt.selected{border-color:var(--indigo-500);background:var(--indigo-50);}
+.role-opt .icon{margin:0 auto 8px;width:28px;height:28px;color:var(--indigo-600);}
+.role-opt .label{font-weight:600;font-size:13.5px;}
+.role-opt .desc{color:var(--text-400);font-size:11.5px;margin-top:2px;}
+.role-gate-note{
+  font-size:11.5px;color:var(--text-400);background:var(--bg);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:18px;
+}
+.btn-primary-full{width:100%;}
+
+/* ---------- Buttons & form controls ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:6px;border-radius:var(--radius-sm);border:1px solid var(--border-strong);
+  background:#fff;color:var(--text-900);padding:8px 14px;font-size:13.5px;font-weight:600;cursor:pointer;
+  transition:.12s;white-space:nowrap;
+}
+.btn:hover{background:#f2f3f8;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.btn-primary{background:var(--indigo-600);border-color:var(--indigo-600);color:#fff;}
+.btn-primary:hover{background:var(--indigo-500);}
+.btn-danger{background:var(--danger-bg);border-color:#f3c6c6;color:var(--danger);}
+.btn-danger:hover{background:#fbdada;}
+.btn-sm{padding:5px 10px;font-size:12.5px;}
+.btn-ghost{border-color:transparent;background:transparent;}
+.btn-ghost:hover{background:#eef0f6;}
+.btn-icon{padding:6px;width:32px;height:32px;justify-content:center;}
+
+label{display:block;font-size:12.5px;font-weight:600;color:var(--text-600);margin-bottom:5px;}
+.field{margin-bottom:14px;}
+.field-row{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));}
+input[type=text],input[type=url],input[type=number],input[type=date],select,textarea{
+  width:100%;border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:9px 10px;
+  font-size:13.5px;background:#fff;color:var(--text-900);font-family:inherit;
+}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--indigo-400);outline-offset:1px;border-color:var(--indigo-400);}
+textarea{resize:vertical;min-height:70px;}
+.hint{font-size:11.5px;color:var(--text-400);margin-top:4px;}
+.error-text{font-size:11.5px;color:var(--danger);margin-top:4px;display:none;}
+.field.has-error input,.field.has-error select{border-color:var(--danger);}
+.field.has-error .error-text{display:block;}
+input[type=file]{font-size:12.5px;}
+
+/* ---------- App shell ---------- */
+#app{display:flex;min-height:100vh;}
+#sidebar{
+  width:var(--sidebar-w);flex:0 0 auto;background:var(--navy-900);color:#cdd3e6;
+  display:flex;flex-direction:column;position:sticky;top:0;height:100vh;transition:width .18s;z-index:50;
+}
+#app.collapsed #sidebar{width:var(--sidebar-w-collapsed);}
+.sb-brand{display:flex;align-items:center;gap:10px;padding:16px 16px;border-bottom:1px solid rgba(255,255,255,.08);}
+.sb-brand .mark{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--indigo-500),var(--indigo-400));
+  display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;flex:0 0 auto;}
+.sb-brand .name{font-weight:700;color:#fff;font-size:14.5px;white-space:nowrap;overflow:hidden;}
+#app.collapsed .sb-brand .name,#app.collapsed .nav-label,#app.collapsed .sb-role .r-text{display:none;}
+.sb-nav{flex:1;overflow-y:auto;padding:10px 8px;}
+.nav-item{
+  display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:8px;cursor:pointer;
+  color:#b6bdd4;font-size:13px;font-weight:550;margin-bottom:2px;white-space:nowrap;
+}
+.nav-item .icon{flex:0 0 auto;}
+.nav-item:hover{background:rgba(255,255,255,.06);color:#fff;}
+.nav-item.active{background:var(--indigo-600);color:#fff;}
+.sb-foot{padding:12px;border-top:1px solid rgba(255,255,255,.08);}
+.sb-role{display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px;background:rgba(255,255,255,.05);}
+.sb-role .r-avatar{width:28px;height:28px;border-radius:50%;background:var(--indigo-500);display:flex;align-items:center;
+  justify-content:center;color:#fff;font-size:12px;font-weight:700;flex:0 0 auto;}
+.sb-role .r-text{font-size:11.5px;color:#cdd3e6;line-height:1.3;}
+.sb-role .r-text b{color:#fff;display:block;font-size:12.5px;}
+.sb-collapse-btn{width:100%;margin-top:8px;}
+
+#main-col{flex:1;min-width:0;display:flex;flex-direction:column;}
+#topbar{
+  height:var(--topbar-h);background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:14px;padding:0 20px;position:sticky;top:0;z-index:40;
+}
+#topbar .page-title{font-size:16.5px;font-weight:700;flex:1;}
+#hamburger-btn{display:none;}
+.topbar-search{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);
+  border-radius:20px;padding:6px 12px;color:var(--text-400);font-size:12.5px;}
+
+#view{padding:22px;max-width:1280px;width:100%;margin:0 auto;}
+
+/* mobile drawer */
+#mobile-overlay{position:fixed;inset:0;background:rgba(10,14,30,.5);z-index:45;display:none;}
+#mobile-overlay.show{display:block;}
+
+/* ---------- Cards / layout helpers ---------- */
+.grid{display:grid;gap:16px;}
+.grid-4{grid-template-columns:repeat(4,1fr);}
+.grid-3{grid-template-columns:repeat(3,1fr);}
+.grid-2{grid-template-columns:repeat(2,1fr);}
+@media (max-width:1050px){.grid-4{grid-template-columns:repeat(2,1fr);}.grid-3{grid-template-columns:repeat(2,1fr);}}
+@media (max-width:640px){.grid-4,.grid-3,.grid-2{grid-template-columns:1fr;}}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow-sm);}
+.card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px;flex-wrap:wrap;}
+.card-head h2,.card-head h3{font-size:15px;}
+.stat-card{display:flex;flex-direction:column;gap:6px;}
+.stat-card .s-label{font-size:12px;color:var(--text-600);font-weight:600;display:flex;align-items:center;gap:6px;}
+.stat-card .s-value{font-size:26px;font-weight:750;}
+.stat-card .s-sub{font-size:11.5px;color:var(--text-400);}
+
+.section-title{font-size:18px;font-weight:700;margin-bottom:4px;}
+.section-sub{color:var(--text-600);font-size:13px;margin-bottom:18px;}
+
+.demo-label{
+  display:inline-flex;align-items:center;gap:4px;background:var(--warning-bg);color:var(--warning);
+  font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:5px;
+}
+.info-banner{
+  display:flex;gap:10px;align-items:flex-start;background:var(--info-bg);color:var(--info);border:1px solid #bfe3f5;
+  border-radius:var(--radius-sm);padding:10px 12px;font-size:12.5px;margin-bottom:16px;
+}
+
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
+.toolbar .search-box{position:relative;flex:1;min-width:180px;}
+.toolbar .search-box input{padding-left:32px;}
+.toolbar .search-box .icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-400);}
+.toolbar select{width:auto;}
+
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;color:var(--text-600);font-weight:650;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;
+  padding:8px 10px;border-bottom:1px solid var(--border);}
+td{padding:10px 10px;border-bottom:1px solid var(--border);vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+.table-wrap{overflow-x:auto;}
+.row-actions{display:flex;gap:6px;justify-content:flex-end;}
+
+.pill{display:inline-flex;align-items:center;gap:4px;border-radius:20px;padding:3px 10px;font-size:11.5px;font-weight:650;}
+.pill-pending{background:var(--warning-bg);color:var(--warning);}
+.pill-evaluated{background:var(--success-bg);color:var(--success);}
+.pill-overdue{background:var(--danger-bg);color:var(--danger);}
+.pill-open{background:var(--info-bg);color:var(--info);}
+.pill-neutral{background:#eef0f6;color:var(--text-600);}
+
+.empty-state{text-align:center;padding:40px 20px;color:var(--text-400);}
+.empty-state .icon{width:36px;height:36px;margin:0 auto 10px;opacity:.6;}
+.empty-state h4{color:var(--text-600);margin-bottom:4px;}
+
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:18px;flex-wrap:wrap;}
+.tab-btn{padding:9px 14px;font-size:13px;font-weight:600;color:var(--text-600);cursor:pointer;border-bottom:2px solid transparent;}
+.tab-btn.active{color:var(--indigo-600);border-color:var(--indigo-600);}
+
+.badge-row{display:flex;gap:6px;flex-wrap:wrap;}
+
+/* modal */
+#modal-root{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(10,14,30,.45);z-index:600;padding:16px;}
+#modal-root.show{display:flex;}
+.modal-box{background:#fff;border-radius:var(--radius);padding:22px;max-width:480px;width:100%;box-shadow:var(--shadow-md);}
+.modal-box h3{margin-bottom:8px;}
+.modal-box p{color:var(--text-600);font-size:13px;margin-bottom:18px;}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;}
+.modal-box.wide{max-width:640px;}
+
+/* toast */
+#toast-container{position:fixed;bottom:18px;right:18px;z-index:700;display:flex;flex-direction:column;gap:8px;}
+.toast{background:var(--navy-900);color:#fff;padding:11px 16px;border-radius:8px;font-size:13px;box-shadow:var(--shadow-md);
+  animation:toast-in .18s ease-out;max-width:320px;}
+.toast.success{background:#14532d;}
+.toast.error{background:#7f1d1d;}
+@keyframes toast-in{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+/* bars / charts */
+.bar-chart{display:flex;flex-direction:column;gap:10px;}
+.bar-row{display:grid;grid-template-columns:120px 1fr 44px;align-items:center;gap:10px;font-size:12.5px;}
+.bar-track{background:#eef0f6;border-radius:6px;height:14px;overflow:hidden;}
+.bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,var(--indigo-500),var(--indigo-400));}
+.bar-row .bar-val{text-align:right;font-weight:650;color:var(--text-600);}
+
+/* lecture card */
+.lecture-card{display:flex;gap:12px;}
+.lecture-thumb{width:120px;height:68px;border-radius:8px;background:var(--navy-900);flex:0 0 auto;overflow:hidden;position:relative;}
+.lecture-thumb img{width:100%;height:100%;object-fit:cover;}
+.lecture-thumb .play-dot{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;opacity:.85;}
+.meta-chip{display:inline-flex;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:6px;
+  padding:2px 7px;font-size:11px;color:var(--text-600);margin-right:5px;}
+
+/* chat */
+.chat-wrap{display:flex;flex-direction:column;height:520px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+.chat-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--bg);}
+.chat-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:#fafbff;}
+.msg{max-width:78%;padding:9px 13px;border-radius:12px;font-size:13.5px;line-height:1.45;}
+.msg.user{align-self:flex-end;background:var(--indigo-600);color:#fff;border-radius:12px 12px 2px 12px;}
+.msg.bot{align-self:flex-start;background:#fff;border:1px solid var(--border);border-radius:12px 12px 12px 2px;}
+.msg .msg-tag{display:block;font-size:10px;text-transform:uppercase;opacity:.65;margin-bottom:3px;letter-spacing:.04em;}
+.chat-input-row{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border);background:#fff;}
+.chat-input-row input{flex:1;}
+
+/* image preview */
+.img-preview{margin-top:10px;max-width:180px;border-radius:8px;border:1px solid var(--border);overflow:hidden;}
+.img-preview img{width:100%;display:block;}
+
+/* responsive */
+@media (max-width:900px){
+  #sidebar{position:fixed;left:0;top:0;transform:translateX(-100%);transition:transform .2s;width:250px;z-index:60;}
+  #app.mobile-open #sidebar{transform:translateX(0);}
+  #app.collapsed #sidebar{width:250px;}
+  #hamburger-btn{display:inline-flex;}
+  .sb-collapse-btn{display:none;}
+  #view{padding:16px;}
+}
+@media (max-width:480px){
+  .role-options{grid-template-columns:1fr;}
+  .topbar-search{display:none;}
+}
+.hidden{display:none !important;}
+</style>
+</head>
+<body>
+
+<div id="role-gate">
+  <div class="role-card">
+    <div class="brand"><div class="mark">EP</div><div class="name">EduPilot AI</div></div>
+    <div class="subtitle">Phase 1 demonstration — Karnataka State Board &amp; CBSE, Classes 1–10. Choose a role to preview the experience.</div>
+    <div class="role-options" id="role-options">
+      <div class="role-opt" data-role="teacher">
+        <div class="icon" id="ri-teacher"></div>
+        <div class="label">Teacher</div>
+        <div class="desc">Lectures, assignments, evaluation</div>
+      </div>
+      <div class="role-opt" data-role="student">
+        <div class="icon" id="ri-student"></div>
+        <div class="label">Student</div>
+        <div class="desc">Lectures, results, doubt solving</div>
+      </div>
+      <div class="role-opt" data-role="admin">
+        <div class="icon" id="ri-admin"></div>
+        <div class="label">Administrator</div>
+        <div class="desc">Curriculum &amp; platform stats</div>
+      </div>
+    </div>
+    <div class="role-gate-note">This is a demonstration role switcher, not real authentication. No passwords or accounts are used.</div>
+    <button class="btn btn-primary btn-primary-full" id="role-continue-btn" disabled>Continue to dashboard</button>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <div id="mobile-overlay"></div>
+  <aside id="sidebar">
+    <div class="sb-brand">
+      <div class="mark">EP</div>
+      <div class="name">EduPilot AI</div>
+    </div>
+    <nav class="sb-nav" id="sb-nav"></nav>
+    <div class="sb-foot">
+      <div class="sb-role">
+        <div class="r-avatar" id="sb-role-avatar">T</div>
+        <div class="r-text"><b id="sb-role-name">Teacher</b>Demo mode</div>
+      </div>
+      <button class="btn btn-ghost btn-sm sb-collapse-btn" id="collapse-btn" style="color:#cdd3e6;">« Collapse</button>
+    </div>
+  </aside>
+
+  <div id="main-col">
+    <header id="topbar">
+      <button class="btn btn-icon btn-ghost" id="hamburger-btn" aria-label="Menu"></button>
+      <div class="page-title" id="page-title">Overview</div>
+      <div class="topbar-search"><span class="icon" id="topbar-search-icon"></span><span>Demo build · Phase 1</span></div>
+      <button class="btn btn-sm" id="switch-role-btn">Switch role</button>
+    </header>
+    <main id="view"></main>
+  </div>
+</div>
+
+<div id="modal-root"><div class="modal-box" id="modal-box"></div></div>
+<div id="toast-container"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ========================================================================
+   ICONS
+======================================================================== */
+const ICONS = {
+  overview:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  curriculum:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v18H6.5A2.5 2.5 0 0 1 4 18.5v-13z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v18h5.5a2.5 2.5 0 0 0 2.5-2.5v-13z"/></svg>',
+  lectures:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M10 8.5l6 3.5-6 3.5v-7z" fill="currentColor" stroke="none"/></svg>',
+  assignments:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M8.5 11h7M8.5 15h7"/></svg>',
+  submissions:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M8 8l4-4 4 4"/><path d="M4 15.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5"/></svg>',
+  performance:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V11M10 19V5M16 19v-7"/><path d="M2 19h20"/></svg>',
+  doubt:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v10.5H9.5L5 19v-3.5H4V5z"/></svg>',
+  library:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1.2"/><rect x="12" y="4" width="7" height="16" rx="1.2"/><path d="M6.5 8.5h0M15.5 8.5h0"/></svg>',
+  settings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h8M16 6h4M4 12h4M12 12h8M4 18h12M19.5 18h0"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16.5" cy="18" r="2"/></svg>',
+  menu:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>',
+  close:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
+  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19.5 8.5a2 2 0 0 0 0-2.8l-1.2-1.2a2 2 0 0 0-2.8 0L4 16v4z"/></svg>',
+  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>',
+  user:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6"/></svg>',
+  shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 7.8-8 9-4.5-1.2-8-4-8-9V6l8-3z"/></svg>',
+  link:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14L21 3M21 3h-6M21 3v6"/><path d="M5 12v7a2 2 0 0 0 2 2h7"/></svg>',
+};
+function ico(name){ return `<span class="icon">${ICONS[name]||''}</span>`; }
+
+/* ========================================================================
+   CURRICULUM DATA (configurable — not an authoritative source)
+======================================================================== */
+const CURRICULUM = {
+  karnataka: { label:'Karnataka State Board', mediums:['English Medium','Kannada Medium'] },
+  cbse: { label:'CBSE', mediums:['English Medium','Hindi Medium'] },
+};
+const EXPLANATION_LANGUAGES = ['English','Hindi','Kannada'];
+const ACADEMIC_YEARS = ['2024-25','2025-26','2026-27','2027-28'];
+const DEFAULT_ACADEMIC_YEAR = '2026-27';
+const CLASS_LIST = [1,2,3,4,5,6,7,8,9,10];
+
+function subjectsForClass(board, cls){
+  cls = Number(cls);
+  const langSubject = board === 'karnataka' ? 'Kannada' : 'Hindi';
+  if(cls <= 5) return ['English', langSubject, 'Mathematics', 'Environmental Studies'];
+  return ['English', langSubject, 'Mathematics', 'Science', 'Social Science'];
+}
+function boardLabel(b){ return (CURRICULUM[b] && CURRICULUM[b].label) || b; }
+
+/* ========================================================================
+   STORAGE
+======================================================================== */
+const SK = {
+  role:'edupilot_role', seed:'edupilot_seed_v1',
+  curriculum:'edupilot_curriculumEntries', lectures:'edupilot_lectures',
+  assignments:'edupilot_assignments', submissions:'edupilot_submissions',
+  library:'edupilot_library', chat:'edupilot_chat_',
+};
+function load(key, fallback){
+  try{
+    const raw = localStorage.getItem(key);
+    if(raw === null) return fallback;
+    const parsed = JSON.parse(raw);
+    if(fallback && Array.isArray(fallback) && !Array.isArray(parsed)) return fallback;
+    return parsed;
+  }catch(e){ return fallback; }
+}
+function save(key, value){
+  try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){ toast('Could not save demo data (storage full or unavailable).','error'); }
+}
+
+/* ========================================================================
+   UTILS
+======================================================================== */
+function $(sel, root){ return (root||document).querySelector(sel); }
+function $$(sel, root){ return Array.from((root||document).querySelectorAll(sel)); }
+function uid(prefix){ return (prefix||'id')+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function escapeHtml(str){
+  return String(str==null?'':str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtDate(iso){
+  if(!iso) return '—';
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'});
+}
+function toast(msg, type){
+  const el = document.createElement('div');
+  el.className = 'toast'+(type?(' '+type):'');
+  el.textContent = msg;
+  $('#toast-container').appendChild(el);
+  setTimeout(()=>{ el.remove(); }, 3200);
+}
+function youtubeId(url){
+  if(!url) return null;
+  const m = String(url).match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
+  return m ? m[1] : null;
+}
+function debounce(fn, ms){
+  let t; return function(...args){ clearTimeout(t); t = setTimeout(()=>fn.apply(this,args), ms||250); };
+}
+
+/* confirm modal */
+function openModalHtml(html){
+  const box = $('#modal-box');
+  box.innerHTML = html;
+  $('#modal-root').classList.add('show');
+}
+function closeModal(){ $('#modal-root').classList.remove('show'); $('#modal-box').innerHTML=''; }
+let _confirmCb = null;
+function confirmAction(title, message, onConfirm, danger){
+  _confirmCb = onConfirm;
+  openModalHtml(`
+    <h3>${escapeHtml(title)}</h3>
+    <p>${escapeHtml(message)}</p>
+    <div class="modal-actions">
+      <button class="btn" data-action="modal-cancel">Cancel</button>
+      <button class="btn ${danger?'btn-danger':'btn-primary'}" data-action="modal-confirm">Confirm</button>
+    </div>`);
+}
+$('#modal-root').addEventListener('click', function(e){
+  if(e.target === this) return closeModal();
+  const act = e.target.closest('[data-action]');
+  if(!act) return;
+  if(act.dataset.action === 'modal-cancel' || act.dataset.action === 'modal-close'){ closeModal(); }
+  if(act.dataset.action === 'modal-confirm'){ const cb=_confirmCb; closeModal(); if(cb) cb(); }
+});
+
+/* ========================================================================
+   SEED DATA (clearly demonstration records)
+======================================================================== */
+function seedData(){
+  if(load(SK.seed,false)) return;
+
+  const curriculumEntries = [
+    {id:uid('cur'), board:'karnataka', class:'5', subject:'Mathematics', chapter:'Chapter 4: Fractions', topic:'Adding like fractions', year:DEFAULT_ACADEMIC_YEAR},
+    {id:uid('cur'), board:'karnataka', class:'8', subject:'Science', chapter:'Chapter 6: Force and Pressure', topic:'Types of force', year:DEFAULT_ACADEMIC_YEAR},
+    {id:uid('cur'), board:'cbse', class:'7', subject:'Mathematics', chapter:'Chapter 3: Data Handling', topic:'Mean, median and mode', year:DEFAULT_ACADEMIC_YEAR},
+    {id:uid('cur'), board:'cbse', class:'10', subject:'Science', chapter:'Chapter 10: Light — Reflection and Refraction', topic:'Laws of reflection', year:DEFAULT_ACADEMIC_YEAR},
+    {id:uid('cur'), board:'karnataka', class:'3', subject:'Environmental Studies', chapter:'Unit 2: Plants Around Us', topic:'Parts of a plant', year:DEFAULT_ACADEMIC_YEAR},
+    {id:uid('cur'), board:'cbse', class:'9', subject:'Social Science', chapter:'Chapter 1: The French Revolution', topic:'Causes of the revolution', year:DEFAULT_ACADEMIC_YEAR},
+  ];
+
+  const yt = 'dQw4w9WgXcQ';
+  const lectures = [
+    {id:uid('lec'), title:'Introduction to Fractions', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'5', subject:'Mathematics', chapter:'Chapter 4: Fractions', topic:'Adding like fractions', medium:'English Medium', language:'English', createdAt:daysAgo(6)},
+    {id:uid('lec'), title:'Force and Pressure — Basics', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'8', subject:'Science', chapter:'Chapter 6: Force and Pressure', topic:'Types of force', medium:'Kannada Medium', language:'Kannada', createdAt:daysAgo(4)},
+    {id:uid('lec'), title:'Data Handling: Mean, Median, Mode', url:'https://www.youtube.com/watch?v='+yt, board:'cbse', class:'7', subject:'Mathematics', chapter:'Chapter 3: Data Handling', topic:'Mean, median and mode', medium:'English Medium', language:'Hindi', createdAt:daysAgo(2)},
+    {id:uid('lec'), title:'Light: Laws of Reflection', url:'https://www.youtube.com/watch?v='+yt, board:'cbse', class:'10', subject:'Science', chapter:'Chapter 10: Light — Reflection and Refraction', topic:'Laws of reflection', medium:'English Medium', language:'English', createdAt:daysAgo(1)},
+    {id:uid('lec'), title:'Plants Around Us', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'3', subject:'Environmental Studies', chapter:'Unit 2: Plants Around Us', topic:'Parts of a plant', medium:'English Medium', language:'English', createdAt:daysAgo(9)},
+  ];
+
+  const assignments = [
+    {id:uid('asg'), title:'Fractions Worksheet 1', board:'karnataka', class:'5', subject:'Mathematics', chapter:'Chapter 4: Fractions', lectureId:lectures[0].id, dueDate:daysFromNow(3), status:'Open'},
+    {id:uid('asg'), title:'Force and Pressure — Short Answers', board:'karnataka', class:'8', subject:'Science', chapter:'Chapter 6: Force and Pressure', lectureId:lectures[1].id, dueDate:daysFromNow(5), status:'Open'},
+    {id:uid('asg'), title:'Mean/Median/Mode Practice Set', board:'cbse', class:'7', subject:'Mathematics', chapter:'Chapter 3: Data Handling', lectureId:lectures[2].id, dueDate:daysAgo(1), status:'Overdue'},
+    {id:uid('asg'), title:'Laws of Reflection — Diagram Task', board:'cbse', class:'10', subject:'Science', chapter:'Chapter 10: Light — Reflection and Refraction', lectureId:lectures[3].id, dueDate:daysFromNow(7), status:'Open'},
+    {id:uid('asg'), title:'Label the Parts of a Plant', board:'karnataka', class:'3', subject:'Environmental Studies', chapter:'Unit 2: Plants Around Us', lectureId:lectures[4].id, dueDate:daysFromNow(2), status:'Open'},
+  ];
+
+  const submissions = [
+    {id:uid('sub'), studentName:'Student A (Roll 12)', assignmentId:assignments[0].id, status:'Evaluated', score:82, feedback:'Good grasp of like fractions; practice unlike fractions next.', submittedAt:daysAgo(2)},
+    {id:uid('sub'), studentName:'Student B (Roll 7)', assignmentId:assignments[0].id, status:'Pending Review', score:null, feedback:'', submittedAt:daysAgo(1)},
+    {id:uid('sub'), studentName:'Student C (Roll 19)', assignmentId:assignments[1].id, status:'Evaluated', score:68, feedback:'Correct definitions; include more real-life examples.', submittedAt:daysAgo(3)},
+    {id:uid('sub'), studentName:'Student D (Roll 3)', assignmentId:assignments[2].id, status:'Evaluated', score:91, feedback:'Excellent working shown for median calculation.', submittedAt:daysAgo(4)},
+    {id:uid('sub'), studentName:'Student E (Roll 15)', assignmentId:assignments[3].id, status:'Pending Review', score:null, feedback:'', submittedAt:daysAgo(0)},
+    {id:uid('sub'), studentName:'Student F (Roll 9)', assignmentId:assignments[4].id, status:'Evaluated', score:76, feedback:'Most parts labelled correctly; revise "stem" vs "stalk".', submittedAt:daysAgo(2)},
+  ];
+
+  const library = [
+    {id:uid('lib'), title:'Karnataka Textbook Society Mathematics — Class 5', author:'KTBS', board:'karnataka', class:'5', subject:'Mathematics', link:'https://ktbs.kar.nic.in/'},
+    {id:uid('lib'), title:'NCERT Mathematics — Class 7', author:'NCERT', board:'cbse', class:'7', subject:'Mathematics', link:'https://ncert.nic.in/'},
+    {id:uid('lib'), title:'NCERT Science — Class 10', author:'NCERT', board:'cbse', class:'10', subject:'Science', link:'https://ncert.nic.in/'},
+    {id:uid('lib'), title:'Karnataka Textbook Society Science — Class 8', author:'KTBS', board:'karnataka', class:'8', subject:'Science', link:'https://ktbs.kar.nic.in/'},
+    {id:uid('lib'), title:'NCERT Social Science — Class 9', author:'NCERT', board:'cbse', class:'9', subject:'Social Science', link:'https://ncert.nic.in/'},
+  ];
+
+  save(SK.curriculum, curriculumEntries);
+  save(SK.lectures, lectures);
+  save(SK.assignments, assignments);
+  save(SK.submissions, submissions);
+  save(SK.library, library);
+  save(SK.seed, true);
+}
+function daysAgo(n){ const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString(); }
+function daysFromNow(n){ const d=new Date(); d.setDate(d.getDate()+n); return d.toISOString(); }
+
+/* ========================================================================
+   STATE
+======================================================================== */
+const State = { role:'teacher', route:'overview', chatLang:'English' };
+
+const ROUTES = [
+  {key:'overview', label:'Overview', icon:'overview'},
+  {key:'curriculum', label:'Curriculum', icon:'curriculum'},
+  {key:'lectures', label:'Lectures', icon:'lectures'},
+  {key:'assignments', label:'Assignments', icon:'assignments'},
+  {key:'submissions', label:'Student Submissions', icon:'submissions'},
+  {key:'performance', label:'Performance & Feedback', icon:'performance'},
+  {key:'doubt', label:'AI Doubt Solver', icon:'doubt'},
+  {key:'library', label:'Reference Library', icon:'library'},
+  {key:'settings', label:'Settings', icon:'settings'},
+];
+
+function isTeacherOrAdmin(){ return State.role === 'teacher' || State.role === 'admin'; }
+function isAdmin(){ return State.role === 'admin'; }
+
+/* ========================================================================
+   ROLE GATE
+======================================================================== */
+$('#ri-teacher').innerHTML = ICONS.user;
+$('#ri-student').innerHTML = ICONS.library;
+$('#ri-admin').innerHTML = ICONS.shield;
+$('#topbar-search-icon').innerHTML = ICONS.search;
+$('#hamburger-btn').innerHTML = ico('menu');
+let pendingRole = null;
+$('#role-options').addEventListener('click', function(e){
+  const opt = e.target.closest('.role-opt');
+  if(!opt) return;
+  $$('.role-opt').forEach(o=>o.classList.remove('selected'));
+  opt.classList.add('selected');
+  pendingRole = opt.dataset.role;
+  $('#role-continue-btn').disabled = false;
+});
+$('#role-continue-btn').addEventListener('click', function(){
+  if(!pendingRole) return;
+  State.role = pendingRole;
+  save(SK.role, pendingRole);
+  enterApp();
+});
+$('#switch-role-btn').addEventListener('click', function(){
+  $('#role-gate').style.display = 'flex';
+  $('#app').hidden = true;
+});
+
+function enterApp(){
+  $('#role-gate').style.display = 'none';
+  $('#app').hidden = false;
+  updateRoleUI();
+  navigate(State.route || 'overview');
+}
+
+function updateRoleUI(){
+  const names = {teacher:'Teacher', student:'Student', admin:'Administrator'};
+  const initials = {teacher:'T', student:'S', admin:'A'};
+  $('#sb-role-name').textContent = names[State.role];
+  $('#sb-role-avatar').textContent = initials[State.role];
+}
+
+/* ========================================================================
+   SIDEBAR / NAV / ROUTER
+======================================================================== */
+function renderNav(){
+  $('#sb-nav').innerHTML = ROUTES.map(r => `
+    <div class="nav-item ${State.route===r.key?'active':''}" data-route="${r.key}">
+      ${ico(r.icon)}<span class="nav-label">${r.label}</span>
+    </div>`).join('');
+}
+$('#sb-nav').addEventListener('click', function(e){
+  const item = e.target.closest('.nav-item');
+  if(!item) return;
+  navigate(item.dataset.route);
+  $('#app').classList.remove('mobile-open');
+  $('#mobile-overlay').classList.remove('show');
+});
+$('#collapse-btn').addEventListener('click', function(){
+  $('#app').classList.toggle('collapsed');
+  this.textContent = $('#app').classList.contains('collapsed') ? '»' : '« Collapse';
+});
+$('#hamburger-btn').addEventListener('click', function(){
+  $('#app').classList.toggle('mobile-open');
+  $('#mobile-overlay').classList.toggle('show');
+});
+$('#mobile-overlay').addEventListener('click', function(){
+  $('#app').classList.remove('mobile-open');
+  this.classList.remove('show');
+});
+
+const PAGE_TITLES = {};
+ROUTES.forEach(r=>PAGE_TITLES[r.key]=r.label);
+
+function navigate(route){
+  if(!PAGE_TITLES[route]) route = 'overview';
+  State.route = route;
+  $('#page-title').textContent = PAGE_TITLES[route];
+  renderNav();
+  renderPage();
+  window.scrollTo(0,0);
+}
+
+function renderPage(){
+  const fn = VIEWS[State.route] || VIEWS.overview;
+  $('#view').innerHTML = fn();
+  if(PAGE_INIT[State.route]) PAGE_INIT[State.route]();
+}
+
+const VIEWS = {};
+const PAGE_INIT = {};
+
+/* ========================================================================
+   SHARED FORM FRAGMENTS
+======================================================================== */
+function boardOptions(selected){
+  return Object.keys(CURRICULUM).map(b=>`<option value="${b}" ${b===selected?'selected':''}>${boardLabel(b)}</option>`).join('');
+}
+function classOptions(selected){
+  return CLASS_LIST.map(c=>`<option value="${c}" ${String(c)===String(selected)?'selected':''}>Class ${c}</option>`).join('');
+}
+function subjectOptions(board, cls, selected){
+  const subs = (board && cls) ? subjectsForClass(board, cls) : [];
+  if(!subs.length) return '<option value="">Select board & class first</option>';
+  return subs.map(s=>`<option value="${s}" ${s===selected?'selected':''}>${s}</option>`).join('');
+}
+function mediumOptions(board, selected){
+  const meds = (CURRICULUM[board] && CURRICULUM[board].mediums) || [];
+  return meds.map(m=>`<option value="${m}" ${m===selected?'selected':''}>${m}</option>`).join('');
+}
+function languageOptions(selected){
+  return EXPLANATION_LANGUAGES.map(l=>`<option value="${l}" ${l===selected?'selected':''}>${l}</option>`).join('');
+}
+function yearOptions(selected){
+  return ACADEMIC_YEARS.map(y=>`<option value="${y}" ${y===(selected||DEFAULT_ACADEMIC_YEAR)?'selected':''}>${y}</option>`).join('');
+}
+
+/* ========================================================================
+   OVERVIEW
+======================================================================== */
+VIEWS.overview = function(){
+  const lectures = load(SK.lectures, []);
+  const assignments = load(SK.assignments, []);
+  const submissions = load(SK.submissions, []);
+  const pending = submissions.filter(s=>s.status==='Pending Review').length;
+  const evaluated = submissions.filter(s=>s.status==='Evaluated');
+  const avgScore = evaluated.length ? Math.round(evaluated.reduce((a,s)=>a+(s.score||0),0)/evaluated.length) : 0;
+  const studentCount = new Set(submissions.map(s=>s.studentName)).size;
+
+  const roleIntro = {
+    teacher:'Here is a snapshot of your lectures, assignments and pending evaluations.',
+    student:'Here is a snapshot of your lectures, results and feedback.',
+    admin:'Here is a platform-wide snapshot across both curricula.',
+  }[State.role];
+
+  const statCards = [
+    {label:'Lectures Uploaded', value:lectures.length, sub:'Across both boards', icon:'lectures', show:true},
+    {label:'Assignments', value:assignments.length, sub:assignments.filter(a=>a.status==='Overdue').length+' overdue', icon:'assignments', show:true},
+    {label:State.role==='student' ? 'My Average Score' : 'Students Tracked', value:State.role==='student' ? (avgScore+'%') : studentCount, sub:State.role==='student' ? 'Across evaluated work' : 'Demo roster', icon:'performance', show:true},
+    {label:'Pending Submissions', value:pending, sub:'Awaiting evaluation', icon:'submissions', show:isTeacherOrAdmin()},
+  ].filter(c=>c.show);
+
+  const recentLectures = lectures.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,4);
+  const upcoming = assignments.filter(a=>a.status!=='Overdue').sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,4);
+
+  const subjAvg = {};
+  evaluated.forEach(s=>{
+    const a = assignments.find(x=>x.id===s.assignmentId);
+    const subj = a ? a.subject : 'Other';
+    subjAvg[subj] = subjAvg[subj] || {sum:0,n:0};
+    subjAvg[subj].sum += s.score; subjAvg[subj].n += 1;
+  });
+  const chartRows = Object.keys(subjAvg).map(k=>({label:k, value:Math.round(subjAvg[k].sum/subjAvg[k].n)}));
+
+  return `
+    <div class="info-banner">${ico('shield')}<div><b>Demo mode.</b> ${roleIntro} All figures below are sample demonstration data, not live records.</div></div>
+    <div class="grid grid-4" style="margin-bottom:20px;">
+      ${statCards.map(c=>`
+        <div class="card stat-card">
+          <div class="s-label">${ico(c.icon)} ${c.label}</div>
+          <div class="s-value">${c.value}</div>
+          <div class="s-sub">${c.sub}</div>
+        </div>`).join('')}
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Recent Lectures <span class="demo-label">Demo data</span></h3></div>
+        ${recentLectures.length ? recentLectures.map(l=>`
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:600;font-size:13px;">${escapeHtml(l.title)}</div>
+            <div class="hint">${boardLabel(l.board)} · Class ${l.class} · ${escapeHtml(l.subject)}</div></div>
+            <div class="hint">${fmtDate(l.createdAt)}</div>
+          </div>`).join('') : emptyState('lectures','No lectures yet.')}
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Upcoming Assignments <span class="demo-label">Demo data</span></h3></div>
+        ${upcoming.length ? upcoming.map(a=>`
+          <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
+            <div><div style="font-weight:600;font-size:13px;">${escapeHtml(a.title)}</div>
+            <div class="hint">${boardLabel(a.board)} · Class ${a.class} · ${escapeHtml(a.subject)}</div></div>
+            <span class="pill ${a.status==='Overdue'?'pill-overdue':'pill-open'}">${a.status}</span>
+          </div>`).join('') : emptyState('assignments','No assignments yet.')}
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <div class="card-head"><h3>Sample Performance by Subject <span class="demo-label">Illustrative</span></h3></div>
+      ${chartRows.length ? `<div class="bar-chart">${chartRows.map(r=>`
+        <div class="bar-row"><div>${escapeHtml(r.label)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${r.value}%"></div></div>
+        <div class="bar-val">${r.value}%</div></div>`).join('')}</div>` : emptyState('performance','No evaluated submissions yet.')}
+    </div>`;
+};
+
+function emptyState(icon, text){
+  return `<div class="empty-state">${ico(icon)}<h4>${escapeHtml(text)}</h4><p>Try adding a demo record from this section.</p></div>`;
+}
+
+/* ========================================================================
+   CURRICULUM
+======================================================================== */
+VIEWS.curriculum = function(){
+  const entries = load(SK.curriculum, []);
+  return `
+    <div class="section-title">Curriculum Metadata</div>
+    <div class="section-sub">Manage board, class, subject, chapter/unit, topic and academic year records used across the platform.</div>
+    <div class="info-banner">${ico('curriculum')}<div>This is a configurable sample curriculum map for demonstration. It has <b>not</b> been verified against the official Karnataka State Board or CBSE syllabus documents.</div></div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3 id="cur-form-title">Add Curriculum Entry</h3></div>
+      <form id="curriculum-form">
+        <input type="hidden" name="id">
+        <div class="field-row">
+          <div class="field"><label>Board</label><select name="board" required>${boardOptions('karnataka')}</select></div>
+          <div class="field"><label>Class</label><select name="class" required>${classOptions(5)}</select></div>
+          <div class="field"><label>Academic Year</label><select name="year">${yearOptions()}</select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Subject</label><select name="subject" required></select></div>
+          <div class="field"><label>Chapter / Unit</label><input type="text" name="chapter" placeholder="e.g. Chapter 4: Fractions" required></div>
+        </div>
+        <div class="field"><label>Topic</label><input type="text" name="topic" placeholder="e.g. Adding like fractions" required></div>
+        <div style="display:flex;gap:8px;">
+          <button type="submit" class="btn btn-primary">${ico('plus')} Save Entry</button>
+          <button type="button" class="btn" id="cur-cancel-edit" style="display:none;">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <div class="search-box">${ico('search')}<input type="text" id="cur-search" placeholder="Search chapter, topic or subject..."></div>
+        <select id="cur-filter-board"><option value="">All boards</option>${boardOptions('')}</select>
+        <select id="cur-filter-class"><option value="">All classes</option>${classOptions('')}</select>
+      </div>
+      <div class="table-wrap" id="cur-table-wrap"></div>
+    </div>`;
+};
+
+function curriculumSubjectRefresh(form){
+  const board = form.board.value, cls = form.class.value;
+  const current = form.subject.value;
+  form.subject.innerHTML = subjectOptions(board, cls, current);
+}
+
+function renderCurriculumTable(){
+  const wrap = $('#cur-table-wrap'); if(!wrap) return;
+  const q = ($('#cur-search')?.value||'').toLowerCase();
+  const fb = $('#cur-filter-board')?.value || '';
+  const fc = $('#cur-filter-class')?.value || '';
+  let entries = load(SK.curriculum, []);
+  entries = entries.filter(e=>{
+    if(fb && e.board!==fb) return false;
+    if(fc && String(e.class)!==fc) return false;
+    if(q && !(e.chapter+e.topic+e.subject).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  if(!entries.length){ wrap.innerHTML = emptyState('curriculum','No curriculum entries match.'); return; }
+  wrap.innerHTML = `<table><thead><tr><th>Board</th><th>Class</th><th>Subject</th><th>Chapter/Unit</th><th>Topic</th><th>Year</th>${isTeacherOrAdmin()?'<th></th>':''}</tr></thead><tbody>
+    ${entries.map(e=>`<tr>
+      <td>${boardLabel(e.board)}</td><td>${e.class}</td><td>${escapeHtml(e.subject)}</td>
+      <td>${escapeHtml(e.chapter)}</td><td>${escapeHtml(e.topic)}</td><td>${e.year||DEFAULT_ACADEMIC_YEAR}</td>
+      ${isTeacherOrAdmin()?`<td class="row-actions">
+        <button class="btn btn-icon btn-ghost" data-action="cur-edit" data-id="${e.id}" title="Edit entry" aria-label="Edit entry">${ico('edit')}</button>
+        <button class="btn btn-icon btn-ghost" data-action="cur-delete" data-id="${e.id}" title="Delete entry" aria-label="Delete entry">${ico('trash')}</button>
+      </td>`:''}
+    </tr>`).join('')}</tbody></table>`;
+}
+
+PAGE_INIT.curriculum = function(){
+  const form = $('#curriculum-form');
+  curriculumSubjectRefresh(form);
+  form.board.addEventListener('change', ()=>curriculumSubjectRefresh(form));
+  form.class.addEventListener('change', ()=>curriculumSubjectRefresh(form));
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    const fd = new FormData(form);
+    const data = Object.fromEntries(fd.entries());
+    let entries = load(SK.curriculum, []);
+    if(data.id){
+      entries = entries.map(x=>x.id===data.id ? {...x, ...data} : x);
+      toast('Curriculum entry updated.','success');
+    } else {
+      data.id = uid('cur');
+      entries.push(data);
+      toast('Curriculum entry added.','success');
+    }
+    save(SK.curriculum, entries);
+    form.reset(); form.id.value=''; curriculumSubjectRefresh(form);
+    $('#cur-form-title').textContent = 'Add Curriculum Entry';
+    $('#cur-cancel-edit').style.display = 'none';
+    renderCurriculumTable();
+  });
+  $('#cur-cancel-edit').addEventListener('click', function(){
+    form.reset(); form.id.value=''; curriculumSubjectRefresh(form);
+    $('#cur-form-title').textContent = 'Add Curriculum Entry';
+    this.style.display = 'none';
+  });
+  $('#cur-table-wrap').addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action]'); if(!btn) return;
+    const id = btn.dataset.id;
+    let entries = load(SK.curriculum, []);
+    if(btn.dataset.action === 'cur-delete'){
+      confirmAction('Delete curriculum entry?','This will remove this demo curriculum record. This cannot be undone.', ()=>{
+        save(SK.curriculum, entries.filter(x=>x.id!==id));
+        toast('Curriculum entry deleted.','success');
+        renderCurriculumTable();
+      }, true);
+    }
+    if(btn.dataset.action === 'cur-edit'){
+      const entry = entries.find(x=>x.id===id); if(!entry) return;
+      form.board.value = entry.board; curriculumSubjectRefresh(form);
+      form.class.value = entry.class; curriculumSubjectRefresh(form);
+      form.subject.value = entry.subject; form.chapter.value = entry.chapter;
+      form.topic.value = entry.topic; form.year.value = entry.year||DEFAULT_ACADEMIC_YEAR;
+      form.id.value = entry.id;
+      $('#cur-form-title').textContent = 'Edit Curriculum Entry';
+      $('#cur-cancel-edit').style.display = 'inline-flex';
+      form.scrollIntoView({behavior:'smooth'});
+    }
+  });
+  ['cur-search','cur-filter-board','cur-filter-class'].forEach(id=>{
+    $('#'+id).addEventListener('input', debounce(renderCurriculumTable,150));
+    $('#'+id).addEventListener('change', renderCurriculumTable);
+  });
+  renderCurriculumTable();
+};
+
+/* ========================================================================
+   LECTURES
+======================================================================== */
+VIEWS.lectures = function(){
+  const canEdit = isTeacherOrAdmin();
+  return `
+    <div class="section-title">Lectures</div>
+    <div class="section-sub">${canEdit?'Add and manage recorded lectures linked to curriculum chapters.':'Browse lectures assigned to your class.'}</div>
+
+    ${canEdit?`
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3 id="lec-form-title">Add Lecture</h3></div>
+      <form id="lecture-form">
+        <input type="hidden" name="id">
+        <div class="field"><label>Lecture Title</label><input type="text" name="title" required placeholder="e.g. Introduction to Fractions"></div>
+        <div class="field">
+          <label>YouTube URL</label>
+          <input type="url" name="url" required placeholder="https://www.youtube.com/watch?v=...">
+          <div class="error-text">Enter a valid YouTube video URL.</div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Board</label><select name="board" required>${boardOptions('karnataka')}</select></div>
+          <div class="field"><label>Class</label><select name="class" required>${classOptions(5)}</select></div>
+          <div class="field"><label>Subject</label><select name="subject" required></select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Chapter / Unit</label><input type="text" name="chapter" required placeholder="e.g. Chapter 4: Fractions"></div>
+          <div class="field"><label>Topic</label><input type="text" name="topic" required placeholder="e.g. Adding like fractions"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Medium of Instruction</label><select name="medium"></select></div>
+          <div class="field"><label>Teaching Language (AI explanation)</label><select name="language">${languageOptions('English')}</select></div>
+        </div>
+        <div id="lec-preview"></div>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button type="submit" class="btn btn-primary">${ico('plus')} Save Lecture</button>
+          <button type="button" class="btn" id="lec-cancel-edit" style="display:none;">Cancel</button>
+        </div>
+      </form>
+    </div>`:''}
+
+    <div class="card">
+      <div class="toolbar">
+        <div class="search-box">${ico('search')}<input type="text" id="lec-search" placeholder="Search lecture title or topic..."></div>
+        <select id="lec-filter-board"><option value="">All boards</option>${boardOptions('')}</select>
+        <select id="lec-filter-class"><option value="">All classes</option>${classOptions('')}</select>
+      </div>
+      <div id="lec-list" class="grid grid-2"></div>
+    </div>`;
+};
+
+function lectureSubjectRefresh(form){
+  const board = form.board.value, cls = form.class.value;
+  const current = form.subject.value;
+  form.subject.innerHTML = subjectOptions(board, cls, current);
+  form.medium.innerHTML = mediumOptions(board, form.medium.value);
+}
+
+function renderLecturePreview(url){
+  const box = $('#lec-preview'); if(!box) return;
+  const vid = youtubeId(url);
+  box.innerHTML = vid ? `<div class="hint" style="margin-bottom:6px;">Preview</div><div class="lecture-thumb" style="width:220px;height:124px;">
+    <img src="https://img.youtube.com/vi/${vid}/hqdefault.jpg" alt="Video thumbnail" onerror="this.style.display='none'">
+    <div class="play-dot">${ico('lectures')}</div></div>` : (url ? '<div class="error-text" style="display:block;">Enter a valid YouTube video URL to preview.</div>' : '');
+}
+
+function renderLectureList(){
+  const list = $('#lec-list'); if(!list) return;
+  const q = ($('#lec-search')?.value||'').toLowerCase();
+  const fb = $('#lec-filter-board')?.value||'';
+  const fc = $('#lec-filter-class')?.value||'';
+  let lectures = load(SK.lectures, []);
+  lectures = lectures.filter(l=>{
+    if(fb && l.board!==fb) return false;
+    if(fc && String(l.class)!==fc) return false;
+    if(q && !(l.title+l.topic).toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  if(!lectures.length){ list.innerHTML = emptyState('lectures','No lectures match your filters.'); return; }
+  const canEdit = isTeacherOrAdmin();
+  list.innerHTML = lectures.map(l=>{
+    const vid = youtubeId(l.url);
+    return `<div class="card lecture-card">
+      <div class="lecture-thumb">${vid?`<img src="https://img.youtube.com/vi/${vid}/hqdefault.jpg" alt="" onerror="this.style.display='none'">`:''}<div class="play-dot">${ico('lectures')}</div></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:650;font-size:13.5px;">${escapeHtml(l.title)}</div>
+        <div style="margin:6px 0;">
+          <span class="meta-chip">${boardLabel(l.board)}</span><span class="meta-chip">Class ${l.class}</span>
+          <span class="meta-chip">${escapeHtml(l.subject)}</span><span class="meta-chip">${escapeHtml(l.medium||'')}</span>
+        </div>
+        <div class="hint">${escapeHtml(l.chapter)} · ${escapeHtml(l.topic)}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+          <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${ico('link')} Watch</a>
+          ${canEdit?`<div class="row-actions">
+            <button class="btn btn-icon btn-ghost" data-action="lec-edit" data-id="${l.id}" title="Edit lecture" aria-label="Edit lecture">${ico('edit')}</button>
+            <button class="btn btn-icon btn-ghost" data-action="lec-delete" data-id="${l.id}" title="Delete lecture" aria-label="Delete lecture">${ico('trash')}</button>
+          </div>`:''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+PAGE_INIT.lectures = function(){
+  ['lec-search','lec-filter-board','lec-filter-class'].forEach(id=>{
+    const el = $('#'+id); if(!el) return;
+    el.addEventListener('input', debounce(renderLectureList,150));
+    el.addEventListener('change', renderLectureList);
+  });
+  $('#lec-list').addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action]'); if(!btn) return;
+    const id = btn.dataset.id;
+    let lectures = load(SK.lectures, []);
+    if(btn.dataset.action==='lec-delete'){
+      confirmAction('Delete lecture?','This demo lecture record will be removed.', ()=>{
+        save(SK.lectures, lectures.filter(x=>x.id!==id));
+        toast('Lecture deleted.','success');
+        renderLectureList();
+      }, true);
+    }
+    if(btn.dataset.action==='lec-edit'){
+      const form = $('#lecture-form'); const l = lectures.find(x=>x.id===id); if(!l||!form) return;
+      form.title.value=l.title; form.url.value=l.url; form.board.value=l.board;
+      lectureSubjectRefresh(form); form.class.value=l.class; lectureSubjectRefresh(form);
+      form.subject.value=l.subject; form.chapter.value=l.chapter; form.topic.value=l.topic;
+      form.medium.value=l.medium; form.language.value=l.language; form.id.value=l.id;
+      renderLecturePreview(l.url);
+      $('#lec-form-title').textContent='Edit Lecture';
+      $('#lec-cancel-edit').style.display='inline-flex';
+      form.scrollIntoView({behavior:'smooth'});
+    }
+  });
+  renderLectureList();
+
+  const form = $('#lecture-form');
+  if(!form) return;
+  lectureSubjectRefresh(form);
+  form.board.addEventListener('change', ()=>lectureSubjectRefresh(form));
+  form.class.addEventListener('change', ()=>lectureSubjectRefresh(form));
+  form.url.addEventListener('input', debounce(()=>renderLecturePreview(form.url.value),300));
+  $('#lec-cancel-edit').addEventListener('click', function(){
+    form.reset(); form.id.value=''; lectureSubjectRefresh(form); $('#lec-preview').innerHTML='';
+    $('#lec-form-title').textContent='Add Lecture'; this.style.display='none';
+  });
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    const fieldWrap = form.url.closest('.field');
+    if(!youtubeId(form.url.value)){ fieldWrap.classList.add('has-error'); return; }
+    fieldWrap.classList.remove('has-error');
+    const fd = new FormData(form);
+    const data = Object.fromEntries(fd.entries());
+    let lectures = load(SK.lectures, []);
+    if(data.id){
+      lectures = lectures.map(x=>x.id===data.id?{...x,...data}:x);
+      toast('Lecture updated.','success');
+    } else {
+      data.id = uid('lec'); data.createdAt = new Date().toISOString();
+      lectures.push(data);
+      toast('Lecture added.','success');
+    }
+    save(SK.lectures, lectures);
+    form.reset(); form.id.value=''; lectureSubjectRefresh(form); $('#lec-preview').innerHTML='';
+    $('#lec-form-title').textContent='Add Lecture'; $('#lec-cancel-edit').style.display='none';
+    renderLectureList();
+  });
+};
+
+/* ========================================================================
+   ASSIGNMENTS
+======================================================================== */
+VIEWS.assignments = function(){
+  const canEdit = isTeacherOrAdmin();
+  return `
+    <div class="section-title">Assignments</div>
+    <div class="section-sub">${canEdit?'Create assignments linked to a class, board, subject, chapter and lecture.':'View assignments for your class.'}</div>
+
+    ${canEdit?`
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3 id="asg-form-title">Add Assignment</h3></div>
+      <form id="assignment-form">
+        <input type="hidden" name="id">
+        <div class="field"><label>Assignment Title</label><input type="text" name="title" required placeholder="e.g. Fractions Worksheet 1"></div>
+        <div class="field-row">
+          <div class="field"><label>Board</label><select name="board" required>${boardOptions('karnataka')}</select></div>
+          <div class="field"><label>Class</label><select name="class" required>${classOptions(5)}</select></div>
+          <div class="field"><label>Subject</label><select name="subject" required></select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Chapter / Unit</label><input type="text" name="chapter" required placeholder="e.g. Chapter 4: Fractions"></div>
+          <div class="field"><label>Linked Lecture (optional)</label><select name="lectureId"><option value="">None</option></select></div>
+          <div class="field"><label>Due Date</label><input type="date" name="dueDate" required></div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button type="submit" class="btn btn-primary">${ico('plus')} Save Assignment</button>
+          <button type="button" class="btn" id="asg-cancel-edit" style="display:none;">Cancel</button>
+        </div>
+      </form>
+    </div>`:''}
+
+    <div class="card">
+      <div class="toolbar">
+        <div class="search-box">${ico('search')}<input type="text" id="asg-search" placeholder="Search assignment title..."></div>
+        <select id="asg-filter-status"><option value="">All statuses</option><option>Open</option><option>Overdue</option></select>
+      </div>
+      <div class="table-wrap" id="asg-table-wrap"></div>
+    </div>`;
+};
+
+function assignmentSubjectRefresh(form){
+  const board = form.board.value, cls = form.class.value;
+  const current = form.subject.value;
+  form.subject.innerHTML = subjectOptions(board, cls, current);
+  const lectures = load(SK.lectures, []).filter(l=>l.board===board && String(l.class)===String(cls));
+  const curLec = form.lectureId.value;
+  form.lectureId.innerHTML = '<option value="">None</option>' + lectures.map(l=>`<option value="${l.id}" ${l.id===curLec?'selected':''}>${escapeHtml(l.title)}</option>`).join('');
+}
+
+function computeAssignmentStatus(a){
+  if(a.status === 'Overdue' || (a.dueDate && new Date(a.dueDate) < new Date() && a.status!=='Closed')) return 'Overdue';
+  return a.status || 'Open';
+}
+
+function renderAssignmentTable(){
+  const wrap = $('#asg-table-wrap'); if(!wrap) return;
+  const q = ($('#asg-search')?.value||'').toLowerCase();
+  const fs = $('#asg-filter-status')?.value||'';
+  let assignments = load(SK.assignments, []);
+  const lectures = load(SK.lectures, []);
+  assignments = assignments.map(a=>({...a, status:computeAssignmentStatus(a)}));
+  assignments = assignments.filter(a=>{
+    if(fs && a.status!==fs) return false;
+    if(q && !a.title.toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+  if(!assignments.length){ wrap.innerHTML = emptyState('assignments','No assignments match.'); return; }
+  const canEdit = isTeacherOrAdmin();
+  wrap.innerHTML = `<table><thead><tr><th>Title</th><th>Board/Class</th><th>Subject</th><th>Linked Lecture</th><th>Due</th><th>Status</th>${canEdit?'<th></th>':''}</tr></thead><tbody>
+    ${assignments.map(a=>{
+      const lec = lectures.find(l=>l.id===a.lectureId);
+      return `<tr>
+        <td>${escapeHtml(a.title)}</td><td>${boardLabel(a.board)} · Class ${a.class}</td><td>${escapeHtml(a.subject)}</td>
+        <td>${lec?escapeHtml(lec.title):'—'}</td><td>${fmtDate(a.dueDate)}</td>
+        <td><span class="pill ${a.status==='Overdue'?'pill-overdue':'pill-open'}">${a.status}</span></td>
+        ${canEdit?`<td class="row-actions">
+          <button class="btn btn-icon btn-ghost" data-action="asg-edit" data-id="${a.id}" title="Edit assignment" aria-label="Edit assignment">${ico('edit')}</button>
+          <button class="btn btn-icon btn-ghost" data-action="asg-delete" data-id="${a.id}" title="Delete assignment" aria-label="Delete assignment">${ico('trash')}</button>
+        </td>`:''}
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+PAGE_INIT.assignments = function(){
+  ['asg-search','asg-filter-status'].forEach(id=>{
+    $('#'+id).addEventListener('input', debounce(renderAssignmentTable,150));
+    $('#'+id).addEventListener('change', renderAssignmentTable);
+  });
+  $('#asg-table-wrap').addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action]'); if(!btn) return;
+    const id = btn.dataset.id;
+    let assignments = load(SK.assignments, []);
+    if(btn.dataset.action==='asg-delete'){
+      confirmAction('Delete assignment?','This demo assignment will be removed.', ()=>{
+        save(SK.assignments, assignments.filter(x=>x.id!==id));
+        toast('Assignment deleted.','success');
+        renderAssignmentTable();
+      }, true);
+    }
+    if(btn.dataset.action==='asg-edit'){
+      const form = $('#assignment-form'); const a = assignments.find(x=>x.id===id); if(!a||!form) return;
+      form.title.value=a.title; form.board.value=a.board; assignmentSubjectRefresh(form);
+      form.class.value=a.class; assignmentSubjectRefresh(form);
+      form.subject.value=a.subject; form.chapter.value=a.chapter;
+      form.lectureId.value=a.lectureId||''; form.dueDate.value=(a.dueDate||'').slice(0,10);
+      form.id.value=a.id;
+      $('#asg-form-title').textContent='Edit Assignment';
+      $('#asg-cancel-edit').style.display='inline-flex';
+      form.scrollIntoView({behavior:'smooth'});
+    }
+  });
+  renderAssignmentTable();
+
+  const form = $('#assignment-form');
+  if(!form) return;
+  assignmentSubjectRefresh(form);
+  form.board.addEventListener('change', ()=>assignmentSubjectRefresh(form));
+  form.class.addEventListener('change', ()=>assignmentSubjectRefresh(form));
+  $('#asg-cancel-edit').addEventListener('click', function(){
+    form.reset(); form.id.value=''; assignmentSubjectRefresh(form);
+    $('#asg-form-title').textContent='Add Assignment'; this.style.display='none';
+  });
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    const fd = new FormData(form);
+    const data = Object.fromEntries(fd.entries());
+    data.status = (new Date(data.dueDate) < new Date()) ? 'Overdue' : 'Open';
+    let assignments = load(SK.assignments, []);
+    if(data.id){
+      assignments = assignments.map(x=>x.id===data.id?{...x,...data}:x);
+      toast('Assignment updated.','success');
+    } else {
+      data.id = uid('asg');
+      assignments.push(data);
+      toast('Assignment added.','success');
+    }
+    save(SK.assignments, assignments);
+    form.reset(); form.id.value=''; assignmentSubjectRefresh(form);
+    $('#asg-form-title').textContent='Add Assignment'; $('#asg-cancel-edit').style.display='none';
+    renderAssignmentTable();
+  });
+};
+
+/* ========================================================================
+   SUBMISSIONS
+======================================================================== */
+VIEWS.submissions = function(){
+  const canEvaluate = isTeacherOrAdmin();
+  const assignments = load(SK.assignments, []);
+  return `
+    <div class="section-title">Student Submissions</div>
+    <div class="section-sub">${canEvaluate?'Review demo submissions and record manual evaluation feedback.':'This is a local frontend demo for uploading an assignment image. No files are uploaded to any server.'}</div>
+    <div class="info-banner">${ico('submissions')}<div>Evaluation shown here is <b>manually entered</b> for this demo — it is not generated by a live AI model.</div></div>
+
+    ${!canEvaluate?`
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Upload Your Work <span class="demo-label">Local demo only</span></h3></div>
+      <div class="field"><label>Assignment</label><select id="sub-upload-assignment">${assignments.map(a=>`<option value="${a.id}">${escapeHtml(a.title)}</option>`).join('')}</select></div>
+      <div class="field"><label>Upload Image</label><input type="file" id="sub-upload-input" accept="image/*"></div>
+      <div id="sub-upload-preview"></div>
+      <button class="btn btn-primary" id="sub-upload-btn" style="margin-top:10px;">Submit (demo only — not saved)</button>
+    </div>`:''}
+
+    <div class="card">
+      <div class="toolbar">
+        <div class="search-box">${ico('search')}<input type="text" id="sub-search" placeholder="Search student name..."></div>
+        <select id="sub-filter-status"><option value="">All statuses</option><option>Pending Review</option><option>Evaluated</option></select>
+      </div>
+      <div class="table-wrap" id="sub-table-wrap"></div>
+    </div>`;
+};
+
+function renderSubmissionTable(){
+  const wrap = $('#sub-table-wrap'); if(!wrap) return;
+  const q = ($('#sub-search')?.value||'').toLowerCase();
+  const fs = $('#sub-filter-status')?.value||'';
+  const assignments = load(SK.assignments, []);
+  let subs = load(SK.submissions, []);
+  subs = subs.filter(s=>{
+    if(fs && s.status!==fs) return false;
+    if(q && !s.studentName.toLowerCase().includes(q)) return false;
+    return true;
+  }).sort((a,b)=>new Date(b.submittedAt)-new Date(a.submittedAt));
+  if(!subs.length){ wrap.innerHTML = emptyState('submissions','No submissions match.'); return; }
+  const canEvaluate = isTeacherOrAdmin();
+  wrap.innerHTML = `<table><thead><tr><th>Student</th><th>Assignment</th><th>Submitted</th><th>Status</th><th>Score</th>${canEvaluate?'<th></th>':''}</tr></thead><tbody>
+    ${subs.map(s=>{
+      const a = assignments.find(x=>x.id===s.assignmentId);
+      return `<tr>
+        <td>${escapeHtml(s.studentName)}</td><td>${a?escapeHtml(a.title):'—'}</td><td>${fmtDate(s.submittedAt)}</td>
+        <td><span class="pill ${s.status==='Evaluated'?'pill-evaluated':'pill-pending'}">${s.status}</span></td>
+        <td>${s.score!=null ? s.score+'%' : '—'}</td>
+        ${canEvaluate?`<td class="row-actions"><button class="btn btn-sm" data-action="sub-eval" data-id="${s.id}">${s.status==='Evaluated'?'Edit Feedback':'Evaluate'}</button></td>`:''}
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+PAGE_INIT.submissions = function(){
+  ['sub-search','sub-filter-status'].forEach(id=>{
+    $('#'+id).addEventListener('input', debounce(renderSubmissionTable,150));
+    $('#'+id).addEventListener('change', renderSubmissionTable);
+  });
+  renderSubmissionTable();
+
+  const upInput = $('#sub-upload-input');
+  if(upInput){
+    upInput.addEventListener('change', function(){
+      const file = this.files && this.files[0];
+      const prev = $('#sub-upload-preview');
+      if(!file){ prev.innerHTML=''; return; }
+      const reader = new FileReader();
+      reader.onload = e => { prev.innerHTML = `<div class="img-preview"><img src="${e.target.result}" alt="Preview"></div><div class="hint">Shown locally in your browser only — not uploaded anywhere.</div>`; };
+      reader.readAsDataURL(file);
+    });
+    $('#sub-upload-btn').addEventListener('click', function(){
+      toast('Demo only: this upload is not saved or sent anywhere.','success');
+    });
+  }
+
+  $('#sub-table-wrap').addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action="sub-eval"]'); if(!btn) return;
+    const id = btn.dataset.id;
+    const subs = load(SK.submissions, []);
+    const s = subs.find(x=>x.id===id); if(!s) return;
+    openModalHtml(`
+      <h3>Evaluate Submission</h3>
+      <p>${escapeHtml(s.studentName)} — manual demo evaluation (not AI-generated).</p>
+      <form id="eval-form">
+        <div class="field"><label>Score (%)</label><input type="number" name="score" min="0" max="100" value="${s.score!=null?s.score:''}" required></div>
+        <div class="field"><label>Feedback</label><textarea name="feedback" required>${escapeHtml(s.feedback||'')}</textarea></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" data-action="modal-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Evaluation</button>
+        </div>
+      </form>`);
+    $('#eval-form').addEventListener('submit', function(ev){
+      ev.preventDefault();
+      const fd = new FormData(this);
+      const updated = subs.map(x=>x.id===id ? {...x, status:'Evaluated', score:Number(fd.get('score')), feedback:fd.get('feedback')} : x);
+      save(SK.submissions, updated);
+      closeModal();
+      toast('Evaluation saved.','success');
+      renderSubmissionTable();
+    });
+  });
+};
+
+/* ========================================================================
+   PERFORMANCE & FEEDBACK
+======================================================================== */
+VIEWS.performance = function(){
+  const subs = load(SK.submissions, []);
+  const assignments = load(SK.assignments, []);
+  const evaluated = subs.filter(s=>s.status==='Evaluated');
+  const byStudent = {};
+  evaluated.forEach(s=>{ (byStudent[s.studentName]=byStudent[s.studentName]||[]).push(s); });
+
+  const subjAvg = {};
+  evaluated.forEach(s=>{
+    const a = assignments.find(x=>x.id===s.assignmentId);
+    const subj = a ? a.subject : 'Other';
+    subjAvg[subj] = subjAvg[subj] || {sum:0,n:0};
+    subjAvg[subj].sum += s.score; subjAvg[subj].n += 1;
+  });
+  const chartRows = Object.keys(subjAvg).map(k=>({label:k, value:Math.round(subjAvg[k].sum/subjAvg[k].n)}));
+
+  return `
+    <div class="section-title">Performance &amp; Feedback</div>
+    <div class="section-sub">Illustrative scores and feedback from the manual demo evaluations above.</div>
+    <div class="info-banner">${ico('performance')}<div>Scores and feedback here are <b>sample/manual demo data</b>, not the output of a real AI evaluation engine.</div></div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Average Score by Subject <span class="demo-label">Illustrative</span></h3></div>
+      ${chartRows.length ? `<div class="bar-chart">${chartRows.map(r=>`
+        <div class="bar-row"><div>${escapeHtml(r.label)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${r.value}%"></div></div>
+        <div class="bar-val">${r.value}%</div></div>`).join('')}</div>` : emptyState('performance','No evaluated submissions yet.')}
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>${State.role==='student'?'My Results':'Student Results'}</h3></div>
+      <div class="table-wrap">
+        ${evaluated.length ? `<table><thead><tr><th>Student</th><th>Assignment</th><th>Score</th><th>Feedback</th></tr></thead><tbody>
+          ${evaluated.map(s=>{
+            const a = assignments.find(x=>x.id===s.assignmentId);
+            return `<tr><td>${escapeHtml(s.studentName)}</td><td>${a?escapeHtml(a.title):'—'}</td><td>${s.score}%</td><td>${escapeHtml(s.feedback)}</td></tr>`;
+          }).join('')}</tbody></table>` : emptyState('performance','No evaluated results yet.')}
+      </div>
+    </div>`;
+};
+
+/* ========================================================================
+   AI DOUBT SOLVER (demo canned responses)
+======================================================================== */
+const DOUBT_SAMPLES = {
+  English: [
+    {k:['fraction'], a:'A fraction represents a part of a whole, written as numerator/denominator. To add fractions with the same denominator, add the numerators and keep the denominator unchanged.'},
+    {k:['force','pressure'], a:'Force is a push or pull on an object. Pressure is force applied per unit area — the same force on a smaller area creates more pressure.'},
+    {k:['mean','median','mode'], a:'Mean is the average of all values. Median is the middle value when data is sorted. Mode is the value that occurs most often.'},
+    {k:['reflection','light'], a:'The laws of reflection state that the angle of incidence equals the angle of reflection, and both rays lie in the same plane as the normal.'},
+  ],
+  Hindi: [
+    {k:['fraction','भिन्न'], a:'भिन्न किसी पूर्ण संख्या के भाग को दर्शाती है। समान हर वाली भिन्नों को जोड़ने के लिए, अंशों को जोड़ें और हर को वैसे ही रखें। (डेमो उत्तर)'},
+    {k:['force','pressure','बल'], a:'बल किसी वस्तु पर लगाया गया धक्का या खिंचाव है। दबाव किसी क्षेत्र पर लगने वाला बल है। (डेमो उत्तर)'},
+  ],
+  Kannada: [
+    {k:['fraction','ಭಿನ್ನರಾಶಿ'], a:'ಭಿನ್ನರಾಶಿ ಎಂದರೆ ಒಂದು ಪೂರ್ಣದ ಭಾಗ. ಒಂದೇ ಛೇದವಿರುವ ಭಿನ್ನರಾಶಿಗಳನ್ನು ಸೇರಿಸಲು, ಅಂಶಗಳನ್ನು ಸೇರಿಸಿ, ಛೇದ ಬದಲಾಗುವುದಿಲ್ಲ. (ಡೆಮೊ ಉತ್ತರ)'},
+    {k:['force','ಬಲ'], a:'ಬಲ ಎಂದರೆ ಒಂದು ವಸ್ತುವಿನ ಮೇಲೆ ತಳ್ಳುವ ಅಥವಾ ಎಳೆಯುವ ಕ್ರಿಯೆ. (ಡೆಮೊ ಉತ್ತರ)'},
+  ],
+};
+const DOUBT_FALLBACK = {
+  English:'This is a demo response. In the full product, this would be answered by an AI model trained on your selected board, class and chapter.',
+  Hindi:'यह एक डेमो उत्तर है। पूर्ण उत्पाद में, यह आपके चयनित बोर्ड, कक्षा और अध्याय के आधार पर AI मॉडल द्वारा उत्तरित किया जाएगा।',
+  Kannada:'ಇದು ಡೆಮೊ ಪ್ರತಿಕ್ರಿಯೆ. ಪೂರ್ಣ ಉತ್ಪನ್ನದಲ್ಲಿ, ಇದನ್ನು ನಿಮ್ಮ ಆಯ್ಕೆಮಾಡಿದ ಬೋರ್ಡ್, ತರಗತಿ ಮತ್ತು ಅಧ್ಯಾಯದ ಆಧಾರದ ಮೇಲೆ AI ಮಾದರಿಯಿಂದ ಉತ್ತರಿಸಲಾಗುತ್ತದೆ.',
+};
+function getDoubtResponse(text, lang){
+  const samples = DOUBT_SAMPLES[lang] || DOUBT_SAMPLES.English;
+  const lower = text.toLowerCase();
+  const hit = samples.find(s=>s.k.some(k=>lower.includes(k.toLowerCase())));
+  return hit ? hit.a : (DOUBT_FALLBACK[lang] || DOUBT_FALLBACK.English);
+}
+
+VIEWS.doubt = function(){
+  return `
+    <div class="section-title">AI Doubt Solver</div>
+    <div class="section-sub">Ask a question and get a response in English, Hindi or Kannada.</div>
+    <div class="info-banner">${ico('doubt')}<div>All responses in this demo are <b>predefined sample answers</b>, clearly for illustration — no live AI model is connected.</div></div>
+    <div class="chat-wrap">
+      <div class="chat-head">
+        <b>Demo Doubt Chat</b>
+        <select id="chat-lang">${languageOptions(State.chatLang)}</select>
+      </div>
+      <div class="chat-messages" id="chat-messages"></div>
+      <form class="chat-input-row" id="chat-form">
+        <input type="text" id="chat-input" placeholder="Type your doubt, e.g. 'How do I add fractions?'" required>
+        <button type="submit" class="btn btn-primary">Send</button>
+      </form>
+    </div>`;
+};
+
+function chatKey(lang){ return SK.chat+lang; }
+function renderChatMessages(){
+  const box = $('#chat-messages'); if(!box) return;
+  const history = load(chatKey(State.chatLang), []);
+  box.innerHTML = history.length ? history.map(m=>`
+    <div class="msg ${m.from}">${m.from==='bot'?'<span class="msg-tag">Demo AI</span>':''}${escapeHtml(m.text)}</div>`).join('')
+    : `<div class="empty-state">${ico('doubt')}<h4>Ask your first question</h4><p>Try: "How do I add fractions?"</p></div>`;
+  box.scrollTop = box.scrollHeight;
+}
+PAGE_INIT.doubt = function(){
+  renderChatMessages();
+  $('#chat-lang').addEventListener('change', function(){ State.chatLang = this.value; renderChatMessages(); });
+  $('#chat-form').addEventListener('submit', function(e){
+    e.preventDefault();
+    const input = $('#chat-input');
+    const text = input.value.trim(); if(!text) return;
+    const history = load(chatKey(State.chatLang), []);
+    history.push({from:'user', text});
+    history.push({from:'bot', text:getDoubtResponse(text, State.chatLang)});
+    save(chatKey(State.chatLang), history);
+    input.value = '';
+    renderChatMessages();
+  });
+};
+
+/* ========================================================================
+   REFERENCE LIBRARY
+======================================================================== */
+VIEWS.library = function(){
+  const canEdit = isTeacherOrAdmin();
+  return `
+    <div class="section-title">Reference Library</div>
+    <div class="section-sub">${canEdit?'Add reference books and compare resources across boards.':'Browse reference books for your subjects.'}</div>
+
+    ${canEdit?`
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Add Reference Book</h3></div>
+      <form id="library-form">
+        <div class="field"><label>Title</label><input type="text" name="title" required></div>
+        <div class="field-row">
+          <div class="field"><label>Author / Publisher</label><input type="text" name="author" required></div>
+          <div class="field"><label>Board</label><select name="board" required>${boardOptions('karnataka')}</select></div>
+          <div class="field"><label>Class</label><select name="class" required>${classOptions(5)}</select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Subject</label><select name="subject" required></select></div>
+          <div class="field"><label>Reference Link</label><input type="url" name="link" placeholder="https://..."></div>
+        </div>
+        <button type="submit" class="btn btn-primary">${ico('plus')} Add Book</button>
+      </form>
+    </div>`:''}
+
+    <div class="card" style="margin-bottom:20px;">
+      <div class="toolbar">
+        <div class="search-box">${ico('search')}<input type="text" id="lib-search" placeholder="Search title or author..."></div>
+        <select id="lib-filter-board"><option value="">All boards</option>${boardOptions('')}</select>
+      </div>
+      <div class="table-wrap" id="lib-table-wrap"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Illustrative Comparison <span class="demo-label">Sample only</span></h3></div>
+      <p class="hint" style="margin-bottom:10px;">Example of how the same subject/class can be compared across boards. For demonstration only — not a verified syllabus comparison.</p>
+      <div class="table-wrap">
+        <table><thead><tr><th>Subject</th><th>Class</th><th>Karnataka State Board</th><th>CBSE</th></tr></thead>
+        <tbody>
+          <tr><td>Mathematics</td><td>7</td><td>KTBS Mathematics Part 1 &amp; 2</td><td>NCERT Mathematics</td></tr>
+          <tr><td>Science</td><td>8</td><td>KTBS Science</td><td>NCERT Science</td></tr>
+          <tr><td>Social Science</td><td>9</td><td>KTBS Social Science</td><td>NCERT Social Science</td></tr>
+        </tbody></table>
+      </div>
+    </div>`;
+};
+
+function librarySubjectRefresh(form){
+  const board = form.board.value, cls = form.class.value;
+  form.subject.innerHTML = subjectOptions(board, cls, form.subject.value);
+}
+function renderLibraryTable(){
+  const wrap = $('#lib-table-wrap'); if(!wrap) return;
+  const q = ($('#lib-search')?.value||'').toLowerCase();
+  const fb = $('#lib-filter-board')?.value||'';
+  let items = load(SK.library, []);
+  items = items.filter(i=>{
+    if(fb && i.board!==fb) return false;
+    if(q && !(i.title+i.author).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  if(!items.length){ wrap.innerHTML = emptyState('library','No reference books match.'); return; }
+  const canEdit = isTeacherOrAdmin();
+  wrap.innerHTML = `<table><thead><tr><th>Title</th><th>Author</th><th>Board/Class</th><th>Subject</th><th>Link</th>${canEdit?'<th></th>':''}</tr></thead><tbody>
+    ${items.map(i=>`<tr>
+      <td>${escapeHtml(i.title)}</td><td>${escapeHtml(i.author)}</td><td>${boardLabel(i.board)} · Class ${i.class}</td>
+      <td>${escapeHtml(i.subject)}</td><td>${i.link?`<a href="${escapeHtml(i.link)}" target="_blank" rel="noopener">${ico('link')} View</a>`:'—'}</td>
+      ${canEdit?`<td class="row-actions"><button class="btn btn-icon btn-ghost" data-action="lib-delete" data-id="${i.id}" title="Delete reference" aria-label="Delete reference">${ico('trash')}</button></td>`:''}
+    </tr>`).join('')}</tbody></table>`;
+}
+PAGE_INIT.library = function(){
+  ['lib-search','lib-filter-board'].forEach(id=>{
+    $('#'+id).addEventListener('input', debounce(renderLibraryTable,150));
+    $('#'+id).addEventListener('change', renderLibraryTable);
+  });
+  $('#lib-table-wrap').addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action="lib-delete"]'); if(!btn) return;
+    confirmAction('Delete reference?','This demo reference book will be removed.', ()=>{
+      save(SK.library, load(SK.library,[]).filter(x=>x.id!==btn.dataset.id));
+      toast('Reference removed.','success');
+      renderLibraryTable();
+    }, true);
+  });
+  renderLibraryTable();
+
+  const form = $('#library-form');
+  if(!form) return;
+  librarySubjectRefresh(form);
+  form.board.addEventListener('change', ()=>librarySubjectRefresh(form));
+  form.class.addEventListener('change', ()=>librarySubjectRefresh(form));
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    const fd = new FormData(form);
+    const data = Object.fromEntries(fd.entries());
+    data.id = uid('lib');
+    const items = load(SK.library, []);
+    items.push(data);
+    save(SK.library, items);
+    toast('Reference book added.','success');
+    form.reset(); librarySubjectRefresh(form);
+    renderLibraryTable();
+  });
+};
+
+/* ========================================================================
+   SETTINGS
+======================================================================== */
+VIEWS.settings = function(){
+  return `
+    <div class="section-title">Settings</div>
+    <div class="section-sub">Manage demo role, demonstration data and review platform limitations.</div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Demo Role</h3></div>
+        <p class="hint" style="margin-bottom:12px;">Current role: <b>${State.role}</b>. Switching role changes which views and actions are shown — it is not real authentication.</p>
+        <button class="btn btn-primary" id="settings-switch-role">Switch Role</button>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Demonstration Data</h3></div>
+        <p class="hint" style="margin-bottom:12px;">Export, import or reset the sample records stored in this browser's local storage.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn" id="settings-export">Export Demo Data (.json)</button>
+          <button class="btn btn-danger" id="settings-reset">Reset Demo Data</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <div class="card-head"><h3>Phase 1 Limitations</h3></div>
+      <ul style="margin:0;padding-left:18px;color:var(--text-600);font-size:13px;line-height:1.8;">
+        <li>Role switching is a demo selector, not secure authentication.</li>
+        <li>All lectures, assignments, submissions, scores and feedback are sample or manually entered demo data.</li>
+        <li>The AI Doubt Solver returns predefined sample answers, not live AI output.</li>
+        <li>Curriculum chapters and topics are illustrative and have not been verified against official syllabi.</li>
+        <li>Image uploads are previewed locally in the browser only and are never stored or transmitted.</li>
+        <li>All data is stored in this browser's localStorage and is not shared between devices.</li>
+      </ul>
+    </div>`;
+};
+PAGE_INIT.settings = function(){
+  $('#settings-switch-role').addEventListener('click', function(){
+    $('#role-gate').style.display = 'flex';
+    $('#app').hidden = true;
+  });
+  $('#settings-export').addEventListener('click', function(){
+    const all = {};
+    Object.keys(SK).forEach(k=>{ if(typeof SK[k]==='string') all[k] = load(SK[k], null); });
+    const blob = new Blob([JSON.stringify(all,null,2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'edupilot-demo-data.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    toast('Demo data exported.','success');
+  });
+  $('#settings-reset').addEventListener('click', function(){
+    confirmAction('Reset all demo data?','This clears all demo lectures, assignments, submissions and reference entries, then reloads the sample dataset. This cannot be undone.', ()=>{
+      Object.values(SK).forEach(k=>{ if(typeof k==='string') localStorage.removeItem(k); });
+      seedData();
+      toast('Demo data reset.','success');
+      navigate('overview');
+    }, true);
+  });
+};
+
+/* ========================================================================
+   INIT
+======================================================================== */
+seedData();
+const savedRole = load(SK.role, null);
+if(savedRole){
+  State.role = savedRole;
+  enterApp();
+}
+
+})();
+</script>
+</body>
+</html>
