@@ -411,13 +411,101 @@ const ACADEMIC_YEARS = ['2024-25','2025-26','2026-27','2027-28'];
 const DEFAULT_ACADEMIC_YEAR = '2026-27';
 const CLASS_LIST = [1,2,3,4,5,6,7,8,9,10];
 
+/* Returns every subject that appears anywhere across Classes 1-10 for the
+   given board, regardless of which class is currently selected — teachers
+   can freely assign any subject to any class rather than being limited to
+   a fixed per-class subset (the Class 1-10 split was just a configurable
+   default, never an official constraint). */
 function subjectsForClass(board, cls){
-  cls = Number(cls);
   const langSubject = board === 'karnataka' ? 'Kannada' : 'Hindi';
-  if(cls <= 5) return ['English', langSubject, 'Mathematics', 'Environmental Studies'];
-  return ['English', langSubject, 'Mathematics', 'Science', 'Social Science'];
+  return ['English', langSubject, 'Mathematics', 'Environmental Studies', 'Science', 'Social Science'];
 }
 function boardLabel(b){ return (CURRICULUM[b] && CURRICULUM[b].label) || b; }
+
+/* Illustrative chapter progression per subject, three chapters per class,
+   ordered Class 1 -> Class 10. This is a configurable sample sequence for
+   browsing — like the rest of this app's curriculum data, it has NOT been
+   verified against official Karnataka State Board or CBSE syllabus
+   documents. Subjects that are not typically taught at a given class
+   (e.g. Science before Class 6) simply have no entry for that class. */
+const CHAPTER_BANK = {
+  English: [
+    ['Phonics and Alphabet','Simple Picture Stories','Rhymes and Poems'],
+    ['Reading Short Stories','Basic Grammar: Nouns','Picture Composition'],
+    ['Grammar: Verbs and Tenses','Comprehension Passages','Letter Writing'],
+    ['Grammar: Adjectives and Adverbs','Story Writing','Poetry Appreciation'],
+    ['Grammar: Sentence Structure','Essay Writing','Reading Comprehension'],
+    ['Prose and Poetry','Grammar: Tenses in Depth','Formal and Informal Letters'],
+    ['Grammar: Clauses and Reported Speech','Notice and Message Writing','Literature: Short Stories'],
+    ['Grammar: Active and Passive Voice','Article and Report Writing','Literature: Novel Study'],
+    ['Grammar: Determiners and Modals','Formal Letter and Application Writing','Literature: Prose and Drama'],
+    ['Grammar: Editing and Omission','Analytical Paragraph Writing','Literature: Prescribed Novel and Poems'],
+  ],
+  Kannada: [
+    ['Kannada Alphabets (Varnamale)','Simple Words and Pictures','Rhymes (Padyagalu)'],
+    ['Reading Short Sentences','Basic Grammar: Nouns','Simple Stories'],
+    ['Grammar: Verbs','Comprehension Passages','Letter Writing Basics'],
+    ['Grammar: Sandhi Basics','Story and Poem Appreciation','Composition Writing'],
+    ['Grammar: Vibhakti (Case Forms)','Essay Writing','Folk Tales'],
+    ['Prose and Poetry Appreciation','Grammar in Depth','Letter and Application Writing'],
+    ['Classical and Modern Poetry','Grammar: Samasa Basics','Short Story Analysis'],
+    ['Grammar: Alankara Basics','Drama and Prose Study','Report Writing'],
+    ['Grammar: Advanced Vibhakti and Samasa','Literature: Prescribed Prose and Poetry','Essay and Letter Writing'],
+    ['Grammar: Comprehensive Review','Literature: Prescribed Novel and Poems','Creative and Analytical Writing'],
+  ],
+  Hindi: [
+    ['Hindi Varnamala (Alphabet)','Simple Words and Pictures','Poems (Kavita)'],
+    ['Reading Short Sentences','Grammar: Sangya (Nouns)','Simple Stories'],
+    ['Grammar: Kriya (Verbs)','Comprehension Passages','Patra Lekhan (Letter Writing) Basics'],
+    ['Grammar: Visheshan (Adjectives)','Story and Poem Appreciation','Composition Writing'],
+    ['Grammar: Sentence Structure','Essay Writing','Folk Tales'],
+    ['Prose and Poetry','Grammar in Depth','Letter and Application Writing'],
+    ['Grammar: Muhavare (Idioms)','Short Story Analysis','Notice and Message Writing'],
+    ['Grammar: Samas Basics','Drama and Prose Study','Report Writing'],
+    ['Grammar: Advanced Vyakaran','Literature: Prescribed Prose and Poetry','Essay and Letter Writing'],
+    ['Grammar: Comprehensive Review','Literature: Prescribed Novel and Poems','Creative Writing'],
+  ],
+  Mathematics: [
+    ['Numbers up to 20 and Counting','Basic Shapes','Addition and Subtraction within 20'],
+    ['Numbers up to 100','Measurement: Length and Weight','Multiplication Tables (2-5)'],
+    ['Numbers up to 1000','Time and Calendar','Money and Simple Transactions'],
+    ['Large Numbers and Place Value','Division Basics','Introduction to Fractions'],
+    ['Fractions','Decimals Introduction','Perimeter and Area'],
+    ['Integers','Basic Geometry and Angles','Ratio and Proportion'],
+    ['Rational Numbers','Simple Algebraic Expressions','Data Handling'],
+    ['Linear Equations in One Variable','Mensuration','Exponents and Powers'],
+    ['Number Systems','Polynomials','Coordinate Geometry'],
+    ['Real Numbers','Quadratic Equations','Trigonometry Basics'],
+  ],
+  'Environmental Studies': [
+    ['My Family and Home','Plants Around Us','Animals Around Us'],
+    ['Food We Eat','Water and Its Uses','Our Neighbourhood'],
+    ['Plants and Their Parts','Air and Weather','Means of Transport'],
+    ['Human Body and Health','Natural Resources','Our Festivals and Culture'],
+    ['Soil and Agriculture','Clean Surroundings and Hygiene','Travel and Communication'],
+  ],
+  Science: {
+    6: ['Food and Its Components','Materials Around Us','Motion and Measurement'],
+    7: ['Nutrition in Plants and Animals','Heat and Temperature','Acids, Bases and Salts'],
+    8: ['Crop Production and Management','Force and Pressure','Cell Structure and Functions'],
+    9: ['Matter in Our Surroundings','Motion and Force','Tissues and Organization of Life'],
+    10: ['Chemical Reactions and Equations','Light — Reflection and Refraction','Heredity and Evolution Basics'],
+  },
+  'Social Science': {
+    6: ['Early Human Civilizations','Our Earth and Globe','Diversity in India'],
+    7: ['Medieval Indian History','Climate and Natural Vegetation','Government and Democracy'],
+    8: ['Modern Indian History (British Era)','Resources and Development','Indian Constitution Basics'],
+    9: ['The French Revolution and World History','Physical Features of India','Democratic Politics and Rights'],
+    10: ["India's Freedom Struggle",'Nationalism and Globalization','Power Sharing and Political Parties'],
+  },
+};
+const SUBJECT_DISPLAY_ORDER = ['English','Kannada','Hindi','Mathematics','Environmental Studies','Science','Social Science'];
+
+function getChaptersForSubjectClass(subject, cls){
+  const bank = CHAPTER_BANK[subject]; if(!bank) return null;
+  if(Array.isArray(bank)) return bank[Number(cls)-1] || null;
+  return bank[Number(cls)] || null;
+}
 
 /* Class bands drive how the assignment generator (Phase 3) adapts question
    type, vocabulary, answer length and marks to the selected class. This is
@@ -835,12 +923,21 @@ function emptyState(icon, text){
 /* ========================================================================
    CURRICULUM
 ======================================================================== */
+const CurriculumMapState = { board:'karnataka', expanded:new Set([1]) };
+
 VIEWS.curriculum = function(){
   const entries = load(SK.curriculum, []);
   return `
     <div class="section-title">Curriculum Metadata</div>
     <div class="section-sub">Manage board, class, subject, chapter/unit, topic and academic year records used across the platform.</div>
     <div class="info-banner">${ico('curriculum')}<div>This is a configurable sample curriculum map for demonstration. It has <b>not</b> been verified against the official Karnataka State Board or CBSE syllabus documents.</div></div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Curriculum Map <span class="demo-label">Illustrative</span></h3></div>
+      <p class="hint" style="margin-bottom:12px;">Every subject, with its sample chapters, laid out in order from Class 1 to Class 10 for the selected board.</p>
+      <div class="field" style="max-width:320px;"><label>Board</label><select id="cur-map-board">${boardOptions(CurriculumMapState.board)}</select></div>
+      <div id="cur-map-classes"></div>
+    </div>
 
     <div class="card" style="margin-bottom:20px;">
       <div class="card-head"><h3 id="cur-form-title">Add Curriculum Entry</h3></div>
@@ -879,6 +976,35 @@ function curriculumSubjectRefresh(form){
   form.subject.innerHTML = subjectOptions(board, cls, current);
 }
 
+function renderCurriculumMap(){
+  const box = $('#cur-map-classes'); if(!box) return;
+  const board = CurriculumMapState.board;
+  const subjects = SUBJECT_DISPLAY_ORDER.filter(s=>{
+    if(s==='Kannada') return board==='karnataka';
+    if(s==='Hindi') return board==='cbse';
+    return true;
+  });
+  box.innerHTML = CLASS_LIST.map(cls=>{
+    const expanded = CurriculumMapState.expanded.has(cls);
+    const subjectsHtml = subjects.map(subject=>{
+      const chapters = getChaptersForSubjectClass(subject, cls);
+      return `<div style="margin-top:10px;">
+        <div style="font-weight:650;font-size:12.5px;">${escapeHtml(subject)}</div>
+        ${chapters
+          ? `<ol style="margin:4px 0 0;padding-left:20px;font-size:12.5px;color:var(--text-600);">${chapters.map(c=>`<li>${escapeHtml(c)}</li>`).join('')}</ol>`
+          : `<p class="hint" style="margin:4px 0 0;">Not typically taught at this class level — no sample chapters defined. You can still add a custom entry above.</p>`}
+      </div>`;
+    }).join('');
+    return `<div class="card" style="background:var(--bg);margin-top:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" data-action="cur-map-toggle" data-cls="${cls}">
+        <b style="font-size:13px;">Class ${cls}</b>
+        <span class="hint">${expanded?'Hide':'Show'} subjects &amp; chapters</span>
+      </div>
+      ${expanded?subjectsHtml:''}
+    </div>`;
+  }).join('');
+}
+
 function renderCurriculumTable(){
   const wrap = $('#cur-table-wrap'); if(!wrap) return;
   const q = ($('#cur-search')?.value||'').toLowerCase();
@@ -904,6 +1030,18 @@ function renderCurriculumTable(){
 }
 
 PAGE_INIT.curriculum = function(){
+  renderCurriculumMap();
+  $('#cur-map-board').addEventListener('change', function(){
+    CurriculumMapState.board = this.value;
+    renderCurriculumMap();
+  });
+  $('#cur-map-classes').addEventListener('click', function(e){
+    const row = e.target.closest('[data-action="cur-map-toggle"]'); if(!row) return;
+    const cls = Number(row.dataset.cls);
+    if(CurriculumMapState.expanded.has(cls)) CurriculumMapState.expanded.delete(cls); else CurriculumMapState.expanded.add(cls);
+    renderCurriculumMap();
+  });
+
   const form = $('#curriculum-form');
   curriculumSubjectRefresh(form);
   form.board.addEventListener('change', ()=>curriculumSubjectRefresh(form));
