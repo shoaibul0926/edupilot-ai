@@ -487,11 +487,11 @@ function seedData(){
 
   const yt = 'dQw4w9WgXcQ';
   const lectures = [
-    {id:uid('lec'), title:'Introduction to Fractions', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'5', subject:'Mathematics', chapter:'Chapter 4: Fractions', topic:'Adding like fractions', medium:'English Medium', language:'English', createdAt:daysAgo(6)},
-    {id:uid('lec'), title:'Force and Pressure — Basics', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'8', subject:'Science', chapter:'Chapter 6: Force and Pressure', topic:'Types of force', medium:'Kannada Medium', language:'Kannada', createdAt:daysAgo(4)},
-    {id:uid('lec'), title:'Data Handling: Mean, Median, Mode', url:'https://www.youtube.com/watch?v='+yt, board:'cbse', class:'7', subject:'Mathematics', chapter:'Chapter 3: Data Handling', topic:'Mean, median and mode', medium:'English Medium', language:'Hindi', createdAt:daysAgo(2)},
-    {id:uid('lec'), title:'Light: Laws of Reflection', url:'https://www.youtube.com/watch?v='+yt, board:'cbse', class:'10', subject:'Science', chapter:'Chapter 10: Light — Reflection and Refraction', topic:'Laws of reflection', medium:'English Medium', language:'English', createdAt:daysAgo(1)},
-    {id:uid('lec'), title:'Plants Around Us', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'3', subject:'Environmental Studies', chapter:'Unit 2: Plants Around Us', topic:'Parts of a plant', medium:'English Medium', language:'English', createdAt:daysAgo(9)},
+    {id:uid('lec'), title:'Introduction to Fractions', description:'A beginner-friendly walkthrough of what fractions represent and how to add fractions with the same denominator.', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'5', subject:'Mathematics', year:DEFAULT_ACADEMIC_YEAR, chapter:'Chapter 4: Fractions', topic:'Adding like fractions', medium:'English Medium', language:'English', objectives:'Understand what a fraction represents\nAdd two fractions with the same denominator', referenceNotes:'Refer to KTBS Mathematics Class 5, Chapter 4 for additional practice problems.', transcript:'', segments:[], createdAt:daysAgo(6)},
+    {id:uid('lec'), title:'Force and Pressure — Basics', description:'Introduces the concepts of force and pressure with everyday examples.', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'8', subject:'Science', year:DEFAULT_ACADEMIC_YEAR, chapter:'Chapter 6: Force and Pressure', topic:'Types of force', medium:'Kannada Medium', language:'Kannada', objectives:'Define force and pressure\nIdentify everyday examples of each type of force', referenceNotes:'Pair with KTBS Science Class 8, Chapter 6 diagrams.', transcript:'', segments:[], createdAt:daysAgo(4)},
+    {id:uid('lec'), title:'Data Handling: Mean, Median, Mode', description:'Explains how to calculate mean, median and mode from a simple data set.', url:'https://www.youtube.com/watch?v='+yt, board:'cbse', class:'7', subject:'Mathematics', year:DEFAULT_ACADEMIC_YEAR, chapter:'Chapter 3: Data Handling', topic:'Mean, median and mode', medium:'English Medium', language:'Hindi', objectives:'Calculate the mean of a data set\nFind the median and mode of a data set', referenceNotes:'NCERT Mathematics Class 7, Chapter 3 has further worked examples.', transcript:'', segments:[], createdAt:daysAgo(2)},
+    {id:uid('lec'), title:'Light: Laws of Reflection', description:'Covers the two laws of reflection with ray diagrams.', url:'https://www.youtube.com/watch?v='+yt, board:'cbse', class:'10', subject:'Science', year:DEFAULT_ACADEMIC_YEAR, chapter:'Chapter 10: Light — Reflection and Refraction', topic:'Laws of reflection', medium:'English Medium', language:'English', objectives:'State the laws of reflection\nDraw a ray diagram showing angle of incidence and reflection', referenceNotes:'NCERT Science Class 10, Chapter 10, Figure 10.2 is a useful reference diagram.', transcript:'', segments:[], createdAt:daysAgo(1)},
+    {id:uid('lec'), title:'Plants Around Us', description:'A simple introduction to the parts of a plant for younger students.', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'3', subject:'Environmental Studies', year:DEFAULT_ACADEMIC_YEAR, chapter:'Unit 2: Plants Around Us', topic:'Parts of a plant', medium:'English Medium', language:'English', objectives:'Name the main parts of a plant\nDescribe the role of roots and leaves', referenceNotes:'KTBS EVS Class 3, Unit 2 has labelled plant diagrams for revision.', transcript:'', segments:[], createdAt:daysAgo(9)},
   ];
 
   const assignments = [
@@ -529,10 +529,26 @@ function seedData(){
 function daysAgo(n){ const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString(); }
 function daysFromNow(n){ const d=new Date(); d.setDate(d.getDate()+n); return d.toISOString(); }
 
+/* Backfills lecture records saved before Phase 2 fields existed, so older
+   demo data never breaks rendering or forms. Safe to run on every load. */
+function migrateLectureSchema(){
+  const lectures = load(SK.lectures, []);
+  let changed = false;
+  const migrated = lectures.map(l=>{
+    const withDefaults = {
+      description:'', year:DEFAULT_ACADEMIC_YEAR, objectives:'', referenceNotes:'',
+      transcript:'', segments:[], ...l,
+    };
+    if(Object.keys(withDefaults).length !== Object.keys(l).length) changed = true;
+    return withDefaults;
+  });
+  if(changed) save(SK.lectures, migrated);
+}
+
 /* ========================================================================
    STATE
 ======================================================================== */
-const State = { role:'teacher', route:'overview', chatLang:'English' };
+const State = { role:'teacher', route:'overview', chatLang:'English', expandedLectureIds:new Set() };
 
 const ROUTES = [
   {key:'overview', label:'Overview', icon:'overview'},
@@ -883,7 +899,7 @@ VIEWS.lectures = function(){
   const canEdit = isTeacherOrAdmin();
   return `
     <div class="section-title">Lectures</div>
-    <div class="section-sub">${canEdit?'Add and manage recorded lectures linked to curriculum chapters.':'Browse lectures assigned to your class.'}</div>
+    <div class="section-sub">${canEdit?'Add and manage recorded lectures linked to curriculum chapters.':'Browse lectures assigned to your board and class.'}</div>
 
     ${canEdit?`
     <div class="card" style="margin-bottom:20px;">
@@ -891,25 +907,42 @@ VIEWS.lectures = function(){
       <form id="lecture-form">
         <input type="hidden" name="id">
         <div class="field"><label>Lecture Title</label><input type="text" name="title" required placeholder="e.g. Introduction to Fractions"></div>
-        <div class="field">
-          <label>YouTube URL</label>
-          <input type="url" name="url" required placeholder="https://www.youtube.com/watch?v=...">
-          <div class="error-text">Enter a valid YouTube video URL.</div>
-        </div>
+        <div class="field"><label>Description <span class="hint" style="font-weight:400;">(optional)</span></label><textarea name="description" placeholder="A short description of what this lecture covers..."></textarea></div>
         <div class="field-row">
           <div class="field"><label>Board</label><select name="board" required>${boardOptions('karnataka')}</select></div>
           <div class="field"><label>Class</label><select name="class" required>${classOptions(5)}</select></div>
           <div class="field"><label>Subject</label><select name="subject" required></select></div>
+          <div class="field"><label>Academic Year</label><select name="year">${yearOptions()}</select></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Chapter / Unit</label><input type="text" name="chapter" required placeholder="e.g. Chapter 4: Fractions"></div>
-          <div class="field"><label>Topic</label><input type="text" name="topic" required placeholder="e.g. Adding like fractions"></div>
+          <div class="field"><label>Chapter / Unit</label><input type="text" name="chapter" required placeholder="e.g. Chapter 4: Fractions" list="lec-chapter-suggestions"><datalist id="lec-chapter-suggestions"></datalist></div>
+          <div class="field"><label>Topic</label><input type="text" name="topic" required placeholder="e.g. Adding like fractions" list="lec-topic-suggestions"><datalist id="lec-topic-suggestions"></datalist></div>
         </div>
         <div class="field-row">
           <div class="field"><label>Medium of Instruction</label><select name="medium"></select></div>
           <div class="field"><label>Teaching Language (AI explanation)</label><select name="language">${languageOptions('English')}</select></div>
         </div>
+
+        <div class="card" style="background:var(--bg);border-style:dashed;margin:4px 0 16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:650;font-size:13px;">Step 1 — Find a lecture video</div>
+              <div class="hint">Opens a YouTube search for this chapter &amp; topic in a new tab — Indian channels, any language (Hindi, Kannada, English and more).</div>
+            </div>
+            <button type="button" class="btn" id="lec-find-btn">${ico('search')} Find on YouTube</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Step 2 — YouTube URL (paste the link of the video you chose)</label>
+          <input type="url" name="url" required placeholder="https://www.youtube.com/watch?v=...">
+          <div class="error-text">Enter a valid YouTube video URL.</div>
+        </div>
         <div id="lec-preview"></div>
+
+        <div class="field" style="margin-top:14px;"><label>Learning Objectives <span class="hint" style="font-weight:400;">(one per line, optional)</span></label><textarea name="objectives" placeholder="e.g.&#10;Understand what a fraction represents&#10;Add two fractions with the same denominator"></textarea></div>
+        <div class="field"><label>Reference Notes <span class="hint" style="font-weight:400;">(optional)</span></label><textarea name="referenceNotes" placeholder="e.g. Refer to KTBS Mathematics Class 5, Chapter 4 for extra practice."></textarea></div>
+
         <div style="display:flex;gap:8px;margin-top:10px;">
           <button type="submit" class="btn btn-primary">${ico('plus')} Save Lecture</button>
           <button type="button" class="btn" id="lec-cancel-edit" style="display:none;">Cancel</button>
@@ -919,9 +952,12 @@ VIEWS.lectures = function(){
 
     <div class="card">
       <div class="toolbar">
-        <div class="search-box">${ico('search')}<input type="text" id="lec-search" placeholder="Search lecture title or topic..."></div>
+        <div class="search-box">${ico('search')}<input type="text" id="lec-search" placeholder="Search title, description or topic..."></div>
         <select id="lec-filter-board"><option value="">All boards</option>${boardOptions('')}</select>
         <select id="lec-filter-class"><option value="">All classes</option>${classOptions('')}</select>
+        <select id="lec-filter-subject"><option value="">All subjects</option></select>
+        <select id="lec-filter-chapter"><option value="">All chapters</option></select>
+        <select id="lec-filter-topic"><option value="">All topics</option></select>
       </div>
       <div id="lec-list" class="grid grid-2"></div>
     </div>`;
@@ -932,7 +968,23 @@ function lectureSubjectRefresh(form){
   const current = form.subject.value;
   form.subject.innerHTML = subjectOptions(board, cls, current);
   form.medium.innerHTML = mediumOptions(board, form.medium.value);
+  refreshLectureSuggestionLists(form);
 }
+
+/* Suggests chapter/topic values already defined in Curriculum for the chosen
+   board, class and subject, so lecture entries stay consistent with it. */
+function refreshLectureSuggestionLists(form){
+  const board = form.board.value, cls = form.class.value, subject = form.subject.value;
+  const entries = load(SK.curriculum, []).filter(e=>e.board===board && String(e.class)===String(cls) && (!subject || e.subject===subject));
+  const chapters = uniqueSorted(entries.map(e=>e.chapter));
+  const topics = uniqueSorted(entries.map(e=>e.topic));
+  const chapterList = $('#lec-chapter-suggestions');
+  if(chapterList) chapterList.innerHTML = chapters.map(c=>`<option value="${escapeHtml(c)}">`).join('');
+  const topicList = $('#lec-topic-suggestions');
+  if(topicList) topicList.innerHTML = topics.map(t=>`<option value="${escapeHtml(t)}">`).join('');
+}
+
+function uniqueSorted(arr){ return Array.from(new Set(arr.filter(Boolean))).sort(); }
 
 function renderLecturePreview(url){
   const box = $('#lec-preview'); if(!box) return;
@@ -942,49 +994,106 @@ function renderLecturePreview(url){
     <div class="play-dot">${ico('lectures')}</div></div>` : (url ? '<div class="error-text" style="display:block;">Enter a valid YouTube video URL to preview.</div>' : '');
 }
 
+/* Cascading filter options: each select's choices are limited to what still
+   matches the filters above it (board -> class -> subject -> chapter -> topic). */
+function renderLectureFilters(){
+  const lectures = load(SK.lectures, []);
+  const fb = $('#lec-filter-board')?.value||'';
+  const fc = $('#lec-filter-class')?.value||'';
+  let pool = lectures.filter(l=> (!fb || l.board===fb) && (!fc || String(l.class)===fc));
+
+  const subjSel = $('#lec-filter-subject');
+  const curSubj = subjSel ? subjSel.value : '';
+  const subjects = uniqueSorted(pool.map(l=>l.subject));
+  const fs = subjects.includes(curSubj) ? curSubj : '';
+  if(subjSel) subjSel.innerHTML = '<option value="">All subjects</option>' + subjects.map(s=>`<option value="${escapeHtml(s)}" ${s===fs?'selected':''}>${escapeHtml(s)}</option>`).join('');
+  pool = pool.filter(l=> !fs || l.subject===fs);
+
+  const chapSel = $('#lec-filter-chapter');
+  const curChap = chapSel ? chapSel.value : '';
+  const chapters = uniqueSorted(pool.map(l=>l.chapter));
+  const fch = chapters.includes(curChap) ? curChap : '';
+  if(chapSel) chapSel.innerHTML = '<option value="">All chapters</option>' + chapters.map(c=>`<option value="${escapeHtml(c)}" ${c===fch?'selected':''}>${escapeHtml(c)}</option>`).join('');
+  pool = pool.filter(l=> !fch || l.chapter===fch);
+
+  const topicSel = $('#lec-filter-topic');
+  const curTopic = topicSel ? topicSel.value : '';
+  const topics = uniqueSorted(pool.map(l=>l.topic));
+  const ft = topics.includes(curTopic) ? curTopic : '';
+  if(topicSel) topicSel.innerHTML = '<option value="">All topics</option>' + topics.map(t=>`<option value="${escapeHtml(t)}" ${t===ft?'selected':''}>${escapeHtml(t)}</option>`).join('');
+}
+
 function renderLectureList(){
   const list = $('#lec-list'); if(!list) return;
   const q = ($('#lec-search')?.value||'').toLowerCase();
   const fb = $('#lec-filter-board')?.value||'';
   const fc = $('#lec-filter-class')?.value||'';
-  let lectures = load(SK.lectures, []);
-  lectures = lectures.filter(l=>{
+  const fs = $('#lec-filter-subject')?.value||'';
+  const fch = $('#lec-filter-chapter')?.value||'';
+  const ft = $('#lec-filter-topic')?.value||'';
+  const allLectures = load(SK.lectures, []);
+  let lectures = allLectures.filter(l=>{
     if(fb && l.board!==fb) return false;
     if(fc && String(l.class)!==fc) return false;
-    if(q && !(l.title+l.topic).toLowerCase().includes(q)) return false;
+    if(fs && l.subject!==fs) return false;
+    if(fch && l.chapter!==fch) return false;
+    if(ft && l.topic!==ft) return false;
+    if(q && !(l.title+' '+(l.description||'')+' '+l.topic+' '+l.chapter).toLowerCase().includes(q)) return false;
     return true;
   }).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+
+  if(!allLectures.length){ list.innerHTML = emptyState('lectures','No lectures yet.'); return; }
   if(!lectures.length){ list.innerHTML = emptyState('lectures','No lectures match your filters.'); return; }
+
   const canEdit = isTeacherOrAdmin();
   list.innerHTML = lectures.map(l=>{
     const vid = youtubeId(l.url);
-    return `<div class="card lecture-card">
-      <div class="lecture-thumb">${vid?`<img src="https://img.youtube.com/vi/${vid}/hqdefault.jpg" alt="" onerror="this.style.display='none'">`:''}<div class="play-dot">${ico('lectures')}</div></div>
-      <div style="flex:1;min-width:0;">
-        <div style="font-weight:650;font-size:13.5px;">${escapeHtml(l.title)}</div>
-        <div style="margin:6px 0;">
-          <span class="meta-chip">${boardLabel(l.board)}</span><span class="meta-chip">Class ${l.class}</span>
-          <span class="meta-chip">${escapeHtml(l.subject)}</span><span class="meta-chip">${escapeHtml(l.medium||'')}</span>
-        </div>
-        <div class="hint">${escapeHtml(l.chapter)} · ${escapeHtml(l.topic)}</div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-          <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${ico('link')} Watch</a>
-          ${canEdit?`<div class="row-actions">
-            <button class="btn btn-icon btn-ghost" data-action="lec-edit" data-id="${l.id}" title="Edit lecture" aria-label="Edit lecture">${ico('edit')}</button>
-            <button class="btn btn-icon btn-ghost" data-action="lec-delete" data-id="${l.id}" title="Delete lecture" aria-label="Delete lecture">${ico('trash')}</button>
-          </div>`:''}
+    const expanded = State.expandedLectureIds.has(l.id);
+    const objectives = (l.objectives||'').split('\n').map(s=>s.trim()).filter(Boolean);
+    return `<div class="card lecture-card" style="flex-direction:column;">
+      <div style="display:flex;gap:12px;">
+        <div class="lecture-thumb">${vid?`<img src="https://img.youtube.com/vi/${vid}/hqdefault.jpg" alt="" onerror="this.style.display='none'">`:''}<div class="play-dot">${ico('lectures')}</div></div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:650;font-size:13.5px;">${escapeHtml(l.title)}</div>
+          <div style="margin:6px 0;">
+            <span class="meta-chip">${boardLabel(l.board)}</span><span class="meta-chip">Class ${l.class}</span>
+            <span class="meta-chip">${escapeHtml(l.subject)}</span><span class="meta-chip">${escapeHtml(l.medium||'')}</span>
+            <span class="meta-chip">${l.year||DEFAULT_ACADEMIC_YEAR}</span>
+          </div>
+          <div class="hint">${escapeHtml(l.chapter)} · ${escapeHtml(l.topic)}</div>
         </div>
       </div>
+      ${l.description?`<p style="font-size:12.5px;color:var(--text-600);margin:10px 0 0;">${escapeHtml(l.description)}</p>`:''}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;gap:14px;align-items:center;">
+          <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${ico('link')} Watch</a>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="lec-toggle-details" data-id="${l.id}">${expanded?'Hide details':'View details'}</button>
+        </div>
+        ${canEdit?`<div class="row-actions">
+          <button class="btn btn-icon btn-ghost" data-action="lec-edit" data-id="${l.id}" title="Edit lecture" aria-label="Edit lecture">${ico('edit')}</button>
+          <button class="btn btn-icon btn-ghost" data-action="lec-delete" data-id="${l.id}" title="Delete lecture" aria-label="Delete lecture">${ico('trash')}</button>
+        </div>`:''}
+      </div>
+      ${expanded?`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+        ${objectives.length?`<div style="margin-bottom:10px;"><b style="font-size:12px;">Learning Objectives</b><ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-600);">${objectives.map(o=>`<li>${escapeHtml(o)}</li>`).join('')}</ul></div>`:''}
+        ${l.referenceNotes?`<div style="margin-bottom:10px;"><b style="font-size:12px;">Reference Notes</b><p style="margin:4px 0 0;font-size:12.5px;color:var(--text-600);">${escapeHtml(l.referenceNotes)}</p></div>`:''}
+        ${!objectives.length && !l.referenceNotes?'<p class="hint">No learning objectives or reference notes added for this lecture yet.</p>':''}
+        <div class="hint">Transcript &amp; timestamped segments: not available in this phase — coming in a future update.</div>
+      </div>`:''}
     </div>`;
   }).join('');
 }
 
 PAGE_INIT.lectures = function(){
-  ['lec-search','lec-filter-board','lec-filter-class'].forEach(id=>{
+  const canEdit = isTeacherOrAdmin();
+
+  ['lec-filter-board','lec-filter-class','lec-filter-subject','lec-filter-chapter','lec-filter-topic'].forEach(id=>{
     const el = $('#'+id); if(!el) return;
-    el.addEventListener('input', debounce(renderLectureList,150));
-    el.addEventListener('change', renderLectureList);
+    el.addEventListener('change', function(){ renderLectureFilters(); renderLectureList(); });
   });
+  $('#lec-search').addEventListener('input', debounce(renderLectureList,150));
+  renderLectureFilters();
+
   $('#lec-list').addEventListener('click', function(e){
     const btn = e.target.closest('[data-action]'); if(!btn) return;
     const id = btn.dataset.id;
@@ -992,16 +1101,24 @@ PAGE_INIT.lectures = function(){
     if(btn.dataset.action==='lec-delete'){
       confirmAction('Delete lecture?','This demo lecture record will be removed.', ()=>{
         save(SK.lectures, lectures.filter(x=>x.id!==id));
+        State.expandedLectureIds.delete(id);
         toast('Lecture deleted.','success');
-        renderLectureList();
+        renderLectureFilters(); renderLectureList();
       }, true);
     }
-    if(btn.dataset.action==='lec-edit'){
+    if(btn.dataset.action==='lec-toggle-details'){
+      if(State.expandedLectureIds.has(id)) State.expandedLectureIds.delete(id); else State.expandedLectureIds.add(id);
+      renderLectureList();
+    }
+    if(btn.dataset.action==='lec-edit' && canEdit){
       const form = $('#lecture-form'); const l = lectures.find(x=>x.id===id); if(!l||!form) return;
-      form.title.value=l.title; form.url.value=l.url; form.board.value=l.board;
+      form.title.value=l.title; form.description.value=l.description||''; form.url.value=l.url; form.board.value=l.board;
       lectureSubjectRefresh(form); form.class.value=l.class; lectureSubjectRefresh(form);
-      form.subject.value=l.subject; form.chapter.value=l.chapter; form.topic.value=l.topic;
-      form.medium.value=l.medium; form.language.value=l.language; form.id.value=l.id;
+      form.subject.value=l.subject; refreshLectureSuggestionLists(form);
+      form.year.value=l.year||DEFAULT_ACADEMIC_YEAR; form.chapter.value=l.chapter; form.topic.value=l.topic;
+      form.medium.value=l.medium; form.language.value=l.language;
+      form.objectives.value=l.objectives||''; form.referenceNotes.value=l.referenceNotes||'';
+      form.id.value=l.id;
       renderLecturePreview(l.url);
       $('#lec-form-title').textContent='Edit Lecture';
       $('#lec-cancel-edit').style.display='inline-flex';
@@ -1015,7 +1132,20 @@ PAGE_INIT.lectures = function(){
   lectureSubjectRefresh(form);
   form.board.addEventListener('change', ()=>lectureSubjectRefresh(form));
   form.class.addEventListener('change', ()=>lectureSubjectRefresh(form));
+  form.subject.addEventListener('change', ()=>refreshLectureSuggestionLists(form));
   form.url.addEventListener('input', debounce(()=>renderLecturePreview(form.url.value),300));
+  $('#lec-find-btn').addEventListener('click', function(){
+    const topic = form.topic.value.trim();
+    const chapter = form.chapter.value.trim();
+    if(!topic && !chapter){ toast('Enter a chapter or topic first to search for a lecture.','error'); return; }
+    const subject = form.subject.value;
+    const cls = form.class.value;
+    const board = form.board.value;
+    const lang = form.language.value;
+    const parts = [topic, chapter, subject, cls?('Class '+cls):'', boardLabel(board), lang && lang!=='English'?lang:'', 'lecture explanation'];
+    const query = parts.filter(Boolean).join(' ');
+    window.open('https://www.youtube.com/results?search_query='+encodeURIComponent(query), '_blank', 'noopener');
+  });
   $('#lec-cancel-edit').addEventListener('click', function(){
     form.reset(); form.id.value=''; lectureSubjectRefresh(form); $('#lec-preview').innerHTML='';
     $('#lec-form-title').textContent='Add Lecture'; this.style.display='none';
@@ -1032,14 +1162,14 @@ PAGE_INIT.lectures = function(){
       lectures = lectures.map(x=>x.id===data.id?{...x,...data}:x);
       toast('Lecture updated.','success');
     } else {
-      data.id = uid('lec'); data.createdAt = new Date().toISOString();
+      data.id = uid('lec'); data.createdAt = new Date().toISOString(); data.transcript=''; data.segments=[];
       lectures.push(data);
       toast('Lecture added.','success');
     }
     save(SK.lectures, lectures);
     form.reset(); form.id.value=''; lectureSubjectRefresh(form); $('#lec-preview').innerHTML='';
     $('#lec-form-title').textContent='Add Lecture'; $('#lec-cancel-edit').style.display='none';
-    renderLectureList();
+    renderLectureFilters(); renderLectureList();
   });
 };
 
@@ -1580,6 +1710,7 @@ PAGE_INIT.settings = function(){
    INIT
 ======================================================================== */
 seedData();
+migrateLectureSchema();
 const savedRole = load(SK.role, null);
 if(savedRole){
   State.role = savedRole;
