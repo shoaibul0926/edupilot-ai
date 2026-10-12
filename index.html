@@ -284,6 +284,14 @@ tr:last-child td{border-bottom:none;}
 /* image preview */
 .img-preview{margin-top:10px;max-width:180px;border-radius:8px;border:1px solid var(--border);overflow:hidden;}
 .img-preview img{width:100%;display:block;}
+.img-thumb-grid{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;}
+.img-thumb{position:relative;width:92px;height:92px;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:#eef0f6;}
+.img-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.img-thumb .img-remove{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:rgba(10,14,30,.7);color:#fff;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;line-height:1;padding:0;}
+.img-thumb .img-remove:hover{background:rgba(10,14,30,.9);}
+.img-thumb .img-name{position:absolute;bottom:0;left:0;right:0;background:rgba(10,14,30,.65);color:#fff;font-size:9px;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.file-error-list{font-size:11.5px;color:var(--danger);margin-top:6px;}
+.file-error-list div{margin-bottom:2px;}
 
 /* responsive */
 @media (max-width:900px){
@@ -480,9 +488,10 @@ function debounce(fn, ms){
 }
 
 /* confirm modal */
-function openModalHtml(html){
+function openModalHtml(html, wide){
   const box = $('#modal-box');
   box.innerHTML = html;
+  box.classList.toggle('wide', !!wide);
   $('#modal-root').classList.add('show');
 }
 function closeModal(){ $('#modal-root').classList.remove('show'); $('#modal-box').innerHTML=''; }
@@ -538,12 +547,12 @@ function seedData(){
   ];
 
   const submissions = [
-    {id:uid('sub'), studentName:'Student A (Roll 12)', assignmentId:assignments[0].id, status:'Evaluated', score:82, feedback:'Good grasp of like fractions; practice unlike fractions next.', submittedAt:daysAgo(2)},
-    {id:uid('sub'), studentName:'Student B (Roll 7)', assignmentId:assignments[0].id, status:'Pending Review', score:null, feedback:'', submittedAt:daysAgo(1)},
-    {id:uid('sub'), studentName:'Student C (Roll 19)', assignmentId:assignments[1].id, status:'Evaluated', score:68, feedback:'Correct definitions; include more real-life examples.', submittedAt:daysAgo(3)},
-    {id:uid('sub'), studentName:'Student D (Roll 3)', assignmentId:assignments[2].id, status:'Evaluated', score:91, feedback:'Excellent working shown for median calculation.', submittedAt:daysAgo(4)},
-    {id:uid('sub'), studentName:'Student E (Roll 15)', assignmentId:assignments[3].id, status:'Pending Review', score:null, feedback:'', submittedAt:daysAgo(0)},
-    {id:uid('sub'), studentName:'Student F (Roll 9)', assignmentId:assignments[4].id, status:'Evaluated', score:76, feedback:'Most parts labelled correctly; revise "stem" vs "stalk".', submittedAt:daysAgo(2)},
+    {id:uid('sub'), studentName:'Student A (Roll 12)', assignmentId:assignments[0].id, board:assignments[0].board, class:assignments[0].class, subject:assignments[0].subject, lectureId:assignments[0].lectureId, status:'Evaluated', reviewReason:null, imageMeta:[{name:'fractions_pg1.jpg', size:1870000, type:'image/jpeg'}], score:82, feedback:'Good grasp of like fractions; practice unlike fractions next.', submittedAt:daysAgo(2), updatedAt:daysAgo(2)},
+    {id:uid('sub'), studentName:'Student B (Roll 7)', assignmentId:assignments[0].id, board:assignments[0].board, class:assignments[0].class, subject:assignments[0].subject, lectureId:assignments[0].lectureId, status:'Uploaded', reviewReason:null, imageMeta:[{name:'fractions_pg1.jpg', size:2010000, type:'image/jpeg'},{name:'fractions_pg2.jpg', size:1950000, type:'image/jpeg'}], score:null, feedback:'', submittedAt:daysAgo(1), updatedAt:daysAgo(1)},
+    {id:uid('sub'), studentName:'Student C (Roll 19)', assignmentId:assignments[1].id, board:assignments[1].board, class:assignments[1].class, subject:assignments[1].subject, lectureId:assignments[1].lectureId, status:'Evaluated', reviewReason:null, imageMeta:[{name:'force_pressure.jpg', size:1690000, type:'image/jpeg'}], score:68, feedback:'Correct definitions; include more real-life examples.', submittedAt:daysAgo(3), updatedAt:daysAgo(3)},
+    {id:uid('sub'), studentName:'Student D (Roll 3)', assignmentId:assignments[2].id, board:assignments[2].board, class:assignments[2].class, subject:assignments[2].subject, lectureId:assignments[2].lectureId, status:'Awaiting Evaluation', reviewReason:null, imageMeta:[{name:'data_handling_pg1.jpg', size:2200000, type:'image/jpeg'},{name:'data_handling_pg2.jpg', size:2100000, type:'image/jpeg'}], score:null, feedback:'', submittedAt:daysAgo(4), updatedAt:daysAgo(4)},
+    {id:uid('sub'), studentName:'Student E (Roll 15)', assignmentId:assignments[3].id, board:assignments[3].board, class:assignments[3].class, subject:assignments[3].subject, lectureId:assignments[3].lectureId, status:'Needs Teacher Review', reviewReason:'Incomplete upload — only 1 of 2 expected pages were received.', imageMeta:[{name:'reflection_pg1.jpg', size:1800000, type:'image/jpeg'}], score:null, feedback:'', submittedAt:daysAgo(0), updatedAt:daysAgo(0)},
+    {id:uid('sub'), studentName:'Student F (Roll 9)', assignmentId:assignments[4].id, board:assignments[4].board, class:assignments[4].class, subject:assignments[4].subject, lectureId:assignments[4].lectureId, status:'Evaluated', reviewReason:null, imageMeta:[{name:'plant_parts.jpg', size:1540000, type:'image/jpeg'}], score:76, feedback:'Most parts labelled correctly; revise "stem" vs "stalk".', submittedAt:daysAgo(2), updatedAt:daysAgo(2)},
   ];
 
   const library = [
@@ -578,6 +587,27 @@ function migrateLectureSchema(){
     return withDefaults;
   });
   if(changed) save(SK.lectures, migrated);
+}
+
+/* Backfills submissions saved before Phase 4 (board/class/subject/lectureId,
+   imageMeta, reviewReason) and remaps the old two-status model onto the
+   current four-status lifecycle. Safe to run on every load. */
+function migrateSubmissionSchema(){
+  const subs = load(SK.submissions, []);
+  const assignments = load(SK.assignments, []);
+  let changed = false;
+  const migrated = subs.map(s=>{
+    const a = assignments.find(x=>x.id===s.assignmentId);
+    const merged = {
+      board:a?a.board:null, class:a?a.class:null, subject:a?a.subject:null, lectureId:a?a.lectureId:null,
+      imageMeta:[], reviewReason:null, updatedAt:s.submittedAt||new Date().toISOString(),
+      ...s,
+    };
+    if(merged.status === 'Pending Review'){ merged.status = 'Awaiting Evaluation'; changed = true; }
+    if(Object.keys(merged).length !== Object.keys(s).length) changed = true;
+    return merged;
+  });
+  if(changed) save(SK.submissions, migrated);
 }
 
 /* ========================================================================
@@ -726,7 +756,7 @@ VIEWS.overview = function(){
   const lectures = load(SK.lectures, []);
   const assignments = load(SK.assignments, []);
   const submissions = load(SK.submissions, []);
-  const pending = submissions.filter(s=>s.status==='Pending Review').length;
+  const pending = submissions.filter(s=>s.status!=='Evaluated').length;
   const evaluated = submissions.filter(s=>s.status==='Evaluated');
   const avgScore = evaluated.length ? Math.round(evaluated.reduce((a,s)=>a+(s.score||0),0)/evaluated.length) : 0;
   const studentCount = new Set(submissions.map(s=>s.studentName)).size;
@@ -1999,6 +2029,46 @@ PAGE_INIT.generator = function(){
   renderGenList();
 };
 
+const ACCEPTED_IMAGE_TYPES = ['image/jpeg','image/png','image/webp'];
+const MAX_IMAGE_MB = 8;
+
+/* Holds actual handwritten-answer-sheet image previews in memory ONLY, for
+   this browser tab's current lifetime — never written to localStorage.
+   This is the demo's stand-in for real server-side storage, and is designed
+   to be clearly separate from it:
+   - Real implementation: client uploads via multipart/form-data over HTTPS
+     to a backend endpoint; the server re-validates type/size (never trusts
+     client-side checks alone), strips EXIF/metadata, generates a random
+     server-side filename, scans for malware, and stores the file in an
+     access-controlled object store (e.g. S3-compatible bucket with
+     per-tenant prefixes), returning only a secure reference/signed URL to
+     save in the database — the raw bytes are never persisted in browser
+     storage.
+   - This demo: only {name, size, type} metadata is ever persisted (via
+     SK.submissions); the pixels themselves live in this in-memory map and
+     are intentionally lost on reload, so they can never be mistaken for
+     durable, secure storage. */
+const SubmissionImageStore = {};
+const NewSubmissionUpload = { files:[] }; // [{file, url, name, size, type}]
+
+function validateImageFile(file){
+  if(!ACCEPTED_IMAGE_TYPES.includes(file.type)) return {ok:false, reason:`${file.name}: unsupported file type — use JPG, PNG or WEBP.`};
+  if(file.size > MAX_IMAGE_MB*1024*1024) return {ok:false, reason:`${file.name}: file is larger than ${MAX_IMAGE_MB}MB.`};
+  return {ok:true};
+}
+function statusPillClass(status){
+  return status==='Evaluated' ? 'pill-evaluated' : status==='Needs Teacher Review' ? 'pill-overdue' : status==='Uploaded' ? 'pill-open' : 'pill-pending';
+}
+function renderCreateThumbs(){
+  const box = $('#sub-create-thumbs'); if(!box) return;
+  box.innerHTML = NewSubmissionUpload.files.map((f,idx)=>`
+    <div class="img-thumb">
+      <img src="${f.url}" alt="${escapeHtml(f.name)}">
+      <span class="img-name">${escapeHtml(f.name)}</span>
+      <button type="button" class="img-remove" data-idx="${idx}" title="Remove" aria-label="Remove image">${ico('close')}</button>
+    </div>`).join('');
+}
+
 /* ========================================================================
    SUBMISSIONS
 ======================================================================== */
@@ -2007,8 +2077,32 @@ VIEWS.submissions = function(){
   const assignments = load(SK.assignments, []);
   return `
     <div class="section-title">Student Submissions</div>
-    <div class="section-sub">${canEvaluate?'Review demo submissions and record manual evaluation feedback.':'This is a local frontend demo for uploading an assignment image. No files are uploaded to any server.'}</div>
+    <div class="section-sub">${canEvaluate?'Upload handwritten answer sheets, review submissions and record manual evaluation feedback.':'This is a local frontend demo for uploading an assignment image. No files are uploaded to any server.'}</div>
     <div class="info-banner">${ico('submissions')}<div>Evaluation shown here is <b>manually entered</b> for this demo — it is not generated by a live AI model.</div></div>
+
+    ${canEvaluate?`
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Add Handwritten Submission</h3></div>
+      <p class="hint" style="margin-bottom:12px;">Photograph a student's handwritten answer sheets (e.g. after collecting physical papers in class) and attach them here.</p>
+      ${!assignments.length ? emptyState('assignments','No assignments yet. Add one on the Assignments page first.') : `
+      <form id="sub-create-form">
+        <div class="field-row">
+          <div class="field"><label>Assignment</label><select name="assignmentId" required>${assignments.map(a=>`<option value="${a.id}">${escapeHtml(a.title)} — ${boardLabel(a.board)} · Class ${a.class} · ${escapeHtml(a.subject)}</option>`).join('')}</select></div>
+          <div class="field"><label>Student Name</label><input type="text" name="studentName" required placeholder="e.g. Student A (Roll 12)"></div>
+        </div>
+        <div class="field">
+          <label>Upload Photos</label>
+          <input type="file" id="sub-create-files" accept="image/jpeg,image/png,image/webp" multiple>
+          <div class="hint">JPG, PNG or WEBP, up to ${MAX_IMAGE_MB}MB each — add as many pages as needed.</div>
+          <div id="sub-create-errors" class="file-error-list"></div>
+          <div id="sub-create-thumbs" class="img-thumb-grid"></div>
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:7px;font-weight:600;"><input type="checkbox" name="incomplete" style="width:auto;"> This batch is incomplete — more pages will be added later</label>
+        </div>
+        <button type="submit" class="btn btn-primary">${ico('plus')} Save Submission</button>
+      </form>`}
+    </div>`:''}
 
     ${!canEvaluate?`
     <div class="card" style="margin-bottom:20px;">
@@ -2022,7 +2116,10 @@ VIEWS.submissions = function(){
     <div class="card">
       <div class="toolbar">
         <div class="search-box">${ico('search')}<input type="text" id="sub-search" placeholder="Search student name..."></div>
-        <select id="sub-filter-status"><option value="">All statuses</option><option>Pending Review</option><option>Evaluated</option></select>
+        <select id="sub-filter-status">
+          <option value="">All statuses</option>
+          <option>Uploaded</option><option>Awaiting Evaluation</option><option>Needs Teacher Review</option><option>Evaluated</option>
+        </select>
       </div>
       <div class="table-wrap" id="sub-table-wrap"></div>
     </div>`;
@@ -2041,24 +2138,104 @@ function renderSubmissionTable(){
   }).sort((a,b)=>new Date(b.submittedAt)-new Date(a.submittedAt));
   if(!subs.length){ wrap.innerHTML = emptyState('submissions','No submissions match.'); return; }
   const canEvaluate = isTeacherOrAdmin();
-  wrap.innerHTML = `<table><thead><tr><th>Student</th><th>Assignment</th><th>Submitted</th><th>Status</th><th>Score</th>${canEvaluate?'<th></th>':''}</tr></thead><tbody>
+  wrap.innerHTML = `<table><thead><tr><th>Student</th><th>Assignment</th><th>Submitted</th><th>Images</th><th>Status</th><th>Score</th><th></th></tr></thead><tbody>
     ${subs.map(s=>{
       const a = assignments.find(x=>x.id===s.assignmentId);
+      const imgCount = (s.imageMeta||[]).length;
+      let actionBtn = '';
+      if(canEvaluate){
+        if(s.status==='Evaluated') actionBtn = `<button class="btn btn-sm" data-action="sub-eval" data-id="${s.id}">Edit Feedback</button>`;
+        else if(s.status==='Awaiting Evaluation') actionBtn = `<button class="btn btn-sm" data-action="sub-eval" data-id="${s.id}">Evaluate</button>`;
+        else if(s.status==='Uploaded') actionBtn = `<button class="btn btn-sm" data-action="sub-ready" data-id="${s.id}">Mark Ready</button>`;
+        else if(s.status==='Needs Teacher Review') actionBtn = `<button class="btn btn-sm" data-action="sub-resolve" data-id="${s.id}">Resolve</button>`;
+      }
       return `<tr>
         <td>${escapeHtml(s.studentName)}</td><td>${a?escapeHtml(a.title):'—'}</td><td>${fmtDate(s.submittedAt)}</td>
-        <td><span class="pill ${s.status==='Evaluated'?'pill-evaluated':'pill-pending'}">${s.status}</span></td>
+        <td>${imgCount} photo${imgCount===1?'':'s'}</td>
+        <td><span class="pill ${statusPillClass(s.status)}">${s.status}</span></td>
         <td>${s.score!=null ? s.score+'%' : '—'}</td>
-        ${canEvaluate?`<td class="row-actions"><button class="btn btn-sm" data-action="sub-eval" data-id="${s.id}">${s.status==='Evaluated'?'Edit Feedback':'Evaluate'}</button></td>`:''}
+        <td class="row-actions">
+          <button class="btn btn-sm" data-action="sub-view" data-id="${s.id}">View</button>
+          ${actionBtn}
+        </td>
       </tr>`;
     }).join('')}</tbody></table>`;
 }
 
 PAGE_INIT.submissions = function(){
+  NewSubmissionUpload.files.forEach(f=>URL.revokeObjectURL(f.url));
+  NewSubmissionUpload.files = [];
+
   ['sub-search','sub-filter-status'].forEach(id=>{
     $('#'+id).addEventListener('input', debounce(renderSubmissionTable,150));
     $('#'+id).addEventListener('change', renderSubmissionTable);
   });
   renderSubmissionTable();
+
+  const createForm = $('#sub-create-form');
+  if(createForm){
+    const filesInput = $('#sub-create-files');
+    filesInput.addEventListener('change', function(){
+      const errors = [];
+      Array.from(this.files).forEach(file=>{
+        const v = validateImageFile(file);
+        if(!v.ok){ errors.push(v.reason); return; }
+        NewSubmissionUpload.files.push({file, url:URL.createObjectURL(file), name:file.name, size:file.size, type:file.type});
+      });
+      this.value = '';
+      renderCreateThumbs();
+      $('#sub-create-errors').innerHTML = errors.map(e=>`<div>${escapeHtml(e)}</div>`).join('');
+    });
+
+    $('#sub-create-thumbs').addEventListener('click', function(e){
+      const btn = e.target.closest('.img-remove'); if(!btn) return;
+      const idx = Number(btn.dataset.idx);
+      URL.revokeObjectURL(NewSubmissionUpload.files[idx].url);
+      NewSubmissionUpload.files.splice(idx,1);
+      renderCreateThumbs();
+    });
+
+    createForm.addEventListener('submit', function(e){
+      e.preventDefault();
+      if(!NewSubmissionUpload.files.length){ toast('Attach at least one photo before saving.','error'); return; }
+      const fd = new FormData(createForm);
+      const assignmentId = fd.get('assignmentId');
+      const studentName = fd.get('studentName').trim();
+      const incomplete = fd.get('incomplete') === 'on';
+      const a = load(SK.assignments, []).find(x=>x.id===assignmentId);
+      if(!a){ toast('Select a valid assignment.','error'); return; }
+
+      const subs = load(SK.submissions, []);
+      const dupe = subs.find(x=>x.assignmentId===assignmentId && x.studentName.toLowerCase()===studentName.toLowerCase());
+
+      const finalize = ()=>{
+        const id = uid('sub');
+        const now = new Date().toISOString();
+        let status = 'Uploaded', reviewReason = null;
+        if(incomplete){ status = 'Needs Teacher Review'; reviewReason = 'Incomplete upload — marked by teacher as missing pages.'; }
+        if(dupe){ status = 'Needs Teacher Review'; reviewReason = (reviewReason?reviewReason+' ':'')+'Duplicate submission for this student and assignment.'; }
+        const record = {
+          id, studentName, assignmentId, board:a.board, class:a.class, subject:a.subject, lectureId:a.lectureId||null,
+          status, reviewReason, imageMeta:NewSubmissionUpload.files.map(f=>({name:f.name, size:f.size, type:f.type})),
+          score:null, feedback:'', submittedAt:now, updatedAt:now,
+        };
+        SubmissionImageStore[id] = NewSubmissionUpload.files.map(f=>({name:f.name, url:f.url}));
+        subs.push(record);
+        save(SK.submissions, subs);
+        NewSubmissionUpload.files = [];
+        createForm.reset();
+        $('#sub-create-thumbs').innerHTML = ''; $('#sub-create-errors').innerHTML = '';
+        toast('Submission saved.'+(status==='Needs Teacher Review'?' Flagged for teacher review.':''), 'success');
+        renderSubmissionTable();
+      };
+
+      if(dupe){
+        confirmAction('Possible duplicate submission', `A submission for ${studentName} on this assignment already exists (status: ${dupe.status}). Saving this one will flag it for teacher review so you can reconcile the two. Continue?`, finalize);
+      } else {
+        finalize();
+      }
+    });
+  }
 
   const upInput = $('#sub-upload-input');
   if(upInput){
@@ -2076,30 +2253,61 @@ PAGE_INIT.submissions = function(){
   }
 
   $('#sub-table-wrap').addEventListener('click', function(e){
-    const btn = e.target.closest('[data-action="sub-eval"]'); if(!btn) return;
+    const btn = e.target.closest('[data-action]'); if(!btn) return;
     const id = btn.dataset.id;
     const subs = load(SK.submissions, []);
     const s = subs.find(x=>x.id===id); if(!s) return;
-    openModalHtml(`
-      <h3>Evaluate Submission</h3>
-      <p>${escapeHtml(s.studentName)} — manual demo evaluation (not AI-generated).</p>
-      <form id="eval-form">
-        <div class="field"><label>Score (%)</label><input type="number" name="score" min="0" max="100" value="${s.score!=null?s.score:''}" required></div>
-        <div class="field"><label>Feedback</label><textarea name="feedback" required>${escapeHtml(s.feedback||'')}</textarea></div>
-        <div class="modal-actions">
-          <button type="button" class="btn" data-action="modal-cancel">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save Evaluation</button>
-        </div>
-      </form>`);
-    $('#eval-form').addEventListener('submit', function(ev){
-      ev.preventDefault();
-      const fd = new FormData(this);
-      const updated = subs.map(x=>x.id===id ? {...x, status:'Evaluated', score:Number(fd.get('score')), feedback:fd.get('feedback')} : x);
+
+    if(btn.dataset.action==='sub-view'){
+      const images = SubmissionImageStore[id];
+      openModalHtml(`
+        <h3>Submission Details</h3>
+        <p>${escapeHtml(s.studentName)} &middot; ${boardLabel(s.board)} · Class ${s.class||''} · ${escapeHtml(s.subject||'')}</p>
+        <p class="hint">Status: <span class="pill ${statusPillClass(s.status)}">${s.status}</span>${s.reviewReason?' — '+escapeHtml(s.reviewReason):''}</p>
+        ${images && images.length
+          ? `<div class="img-thumb-grid">${images.map(img=>`<a href="${img.url}" target="_blank" rel="noopener" class="img-thumb" title="Open full size"><img src="${img.url}" alt="${escapeHtml(img.name)}"><span class="img-name">${escapeHtml(img.name)}</span></a>`).join('')}</div>`
+          : `<div class="info-banner">${ico('shield')}<div>${(s.imageMeta||[]).length} file(s) were attached (${(s.imageMeta||[]).map(m=>escapeHtml(m.name)).join(', ')||'none'}), but the original images were only kept in memory for this browser session and are no longer available after a reload. In the real product these would be stored securely on the server and remain viewable at any time.</div></div>`}
+        <div class="modal-actions" style="margin-top:16px;"><button type="button" class="btn" data-action="modal-close">Close</button></div>`, true);
+    }
+
+    if(btn.dataset.action==='sub-ready'){
+      const updated = subs.map(x=>x.id===id?{...x, status:'Awaiting Evaluation', updatedAt:new Date().toISOString()}:x);
       save(SK.submissions, updated);
-      closeModal();
-      toast('Evaluation saved.','success');
+      toast('Marked ready for evaluation.','success');
       renderSubmissionTable();
-    });
+    }
+
+    if(btn.dataset.action==='sub-resolve'){
+      confirmAction('Resolve review flag?', (s.reviewReason||'This submission was flagged for review.')+' Marking it resolved will move it to Awaiting Evaluation.', ()=>{
+        const updated = subs.map(x=>x.id===id?{...x, status:'Awaiting Evaluation', reviewReason:null, updatedAt:new Date().toISOString()}:x);
+        save(SK.submissions, updated);
+        toast('Review resolved — ready for evaluation.','success');
+        renderSubmissionTable();
+      });
+    }
+
+    if(btn.dataset.action==='sub-eval'){
+      openModalHtml(`
+        <h3>Evaluate Submission</h3>
+        <p>${escapeHtml(s.studentName)} — manual demo evaluation (not AI-generated).</p>
+        <form id="eval-form">
+          <div class="field"><label>Score (%)</label><input type="number" name="score" min="0" max="100" value="${s.score!=null?s.score:''}" required></div>
+          <div class="field"><label>Feedback</label><textarea name="feedback" required>${escapeHtml(s.feedback||'')}</textarea></div>
+          <div class="modal-actions">
+            <button type="button" class="btn" data-action="modal-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save Evaluation</button>
+          </div>
+        </form>`);
+      $('#eval-form').addEventListener('submit', function(ev){
+        ev.preventDefault();
+        const fd = new FormData(this);
+        const updated = subs.map(x=>x.id===id ? {...x, status:'Evaluated', score:Number(fd.get('score')), feedback:fd.get('feedback'), updatedAt:new Date().toISOString()} : x);
+        save(SK.submissions, updated);
+        closeModal();
+        toast('Evaluation saved.','success');
+        renderSubmissionTable();
+      });
+    }
   });
 };
 
@@ -2393,6 +2601,7 @@ PAGE_INIT.settings = function(){
 ======================================================================== */
 seedData();
 migrateLectureSchema();
+migrateSubmissionSchema();
 const savedRole = load(SK.role, null);
 if(savedRole){
   State.role = savedRole;
