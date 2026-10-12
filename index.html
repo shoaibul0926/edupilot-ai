@@ -221,6 +221,24 @@ tr:last-child td{border-bottom:none;}
 .badge-row{display:flex;gap:6px;flex-wrap:wrap;}
 
 /* modal */
+/* print-to-PDF area for the Assignment Generator's question paper / answer key */
+#print-area{display:none;}
+@media print{
+  body *{visibility:hidden;}
+  #print-area, #print-area *{visibility:visible;}
+  #print-area{display:block !important;position:absolute;top:0;left:0;width:100%;padding:24px;font-family:Georgia,'Times New Roman',serif;color:#000;}
+  .print-paper h1{font-size:19px;margin-bottom:4px;}
+  .print-paper .print-meta{font-size:12px;margin-bottom:4px;}
+  .print-paper hr{border:none;border-top:1px solid #000;margin:10px 0 16px;}
+  .print-questions{padding-left:20px;margin:0;}
+  .print-questions > li{margin-bottom:18px;font-size:13px;page-break-inside:avoid;}
+  .print-marks{font-weight:700;font-size:11px;}
+  .print-options{list-style-type:upper-alpha;padding-left:20px;margin-top:6px;}
+  .print-options li{margin-bottom:4px;}
+  .print-line{border-bottom:1px solid #000;height:22px;margin-bottom:4px;}
+  .print-answer,.print-marking{font-size:12px;margin-top:4px;}
+  .print-source{font-size:10px;color:#444;margin-top:4px;}
+}
 #modal-root{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(10,14,30,.45);z-index:600;padding:16px;}
 #modal-root.show{display:flex;}
 .modal-box{background:#fff;border-radius:var(--radius);padding:22px;max-width:480px;width:100%;box-shadow:var(--shadow-md);}
@@ -340,6 +358,7 @@ tr:last-child td{border-bottom:none;}
 </div>
 
 <div id="modal-root"><div class="modal-box" id="modal-box"></div></div>
+<div id="print-area"></div>
 <div id="toast-container"></div>
 
 <script>
@@ -368,6 +387,7 @@ const ICONS = {
   user:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6"/></svg>',
   shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 7.8-8 9-4.5-1.2-8-4-8-9V6l8-3z"/></svg>',
   link:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14L21 3M21 3h-6M21 3v6"/><path d="M5 12v7a2 2 0 0 0 2 2h7"/></svg>',
+  generator:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20L15 9"/><path d="M17 3l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2z"/><path d="M19.5 12.5l.6 1.2 1.2.6-1.2.6-.6 1.2-.6-1.2-1.2-.6 1.2-.6.6-1.2z"/></svg>',
 };
 function ico(name){ return `<span class="icon">${ICONS[name]||''}</span>`; }
 
@@ -391,6 +411,20 @@ function subjectsForClass(board, cls){
 }
 function boardLabel(b){ return (CURRICULUM[b] && CURRICULUM[b].label) || b; }
 
+/* Class bands drive how the assignment generator (Phase 3) adapts question
+   type, vocabulary, answer length and marks to the selected class. This is
+   editable configuration, not an official syllabus claim. */
+const CLASS_BANDS = {
+  foundation: {key:'foundation', classes:[1,2], label:'Foundation (Classes 1-2)', allowedTypes:['mcq','short'], marks:{mcq:1, short:2, long:0, sum:2}, answerLength:'one word or a short phrase', style:'very simple, everyday language and short sentences'},
+  elementary: {key:'elementary', classes:[3,4,5], label:'Elementary (Classes 3-5)', allowedTypes:['mcq','short'], marks:{mcq:1, short:2, long:0, sum:2}, answerLength:'one to two short sentences', style:'simple, clear language with everyday examples'},
+  intermediate: {key:'intermediate', classes:[6,7,8], label:'Intermediate (Classes 6-8)', allowedTypes:['mcq','short','long'], marks:{mcq:1, short:3, long:5, sum:3}, answerLength:'three to five sentences for short answers, a short structured paragraph for long answers', style:'concept-based language with worked examples'},
+  secondary: {key:'secondary', classes:[9,10], label:'Secondary (Classes 9-10)', allowedTypes:['mcq','short','long'], marks:{mcq:1, short:3, long:8, sum:4}, answerLength:'a well-reasoned paragraph for short answers, a structured multi-point answer for long answers', style:'precise, examination-style language with structured reasoning'},
+};
+function getClassBand(cls){
+  cls = Number(cls);
+  return Object.values(CLASS_BANDS).find(b=>b.classes.includes(cls)) || CLASS_BANDS.intermediate;
+}
+
 /* ========================================================================
    STORAGE
 ======================================================================== */
@@ -399,6 +433,7 @@ const SK = {
   curriculum:'edupilot_curriculumEntries', lectures:'edupilot_lectures',
   assignments:'edupilot_assignments', submissions:'edupilot_submissions',
   library:'edupilot_library', chat:'edupilot_chat_',
+  generatedAssignments:'edupilot_generatedAssignments',
 };
 function load(key, fallback){
   try{
@@ -549,12 +584,14 @@ function migrateLectureSchema(){
    STATE
 ======================================================================== */
 const State = { role:'teacher', route:'overview', chatLang:'English', expandedLectureIds:new Set() };
+const GeneratorState = { openAssignmentId:null };
 
 const ROUTES = [
   {key:'overview', label:'Overview', icon:'overview'},
   {key:'curriculum', label:'Curriculum', icon:'curriculum'},
   {key:'lectures', label:'Lectures', icon:'lectures'},
   {key:'assignments', label:'Assignments', icon:'assignments'},
+  {key:'generator', label:'Assignment Generator', icon:'generator'},
   {key:'submissions', label:'Student Submissions', icon:'submissions'},
   {key:'performance', label:'Performance & Feedback', icon:'performance'},
   {key:'doubt', label:'AI Doubt Solver', icon:'doubt'},
@@ -1315,6 +1352,651 @@ PAGE_INIT.assignments = function(){
     $('#asg-form-title').textContent='Add Assignment'; $('#asg-cancel-edit').style.display='none';
     renderAssignmentTable();
   });
+};
+
+/* ========================================================================
+   ASSIGNMENT GENERATOR (Phase 3)
+
+   Content rules this module follows:
+   - A question is only ever generated from a lecture's transcript, reference
+     notes, description or learning objectives — never from the YouTube URL
+     alone, which is not assumed to carry any accessible text.
+   - Multiple-choice distractors are only ever pulled from other lectures of
+     the SAME board and subject, so Karnataka State Board and CBSE content
+     are never silently mixed into one question.
+   - Every question stores its source lecture, chapter, topic, board and
+     class, so provenance is always visible and auditable.
+
+   AIService is written as the seam a real backend would sit behind: in
+   production, generateAssignmentQuestions() would POST to a server endpoint
+   (e.g. /api/ai/generate-assignment) that holds the AI provider's API key
+   server-side. This frontend-only demo never stores or sends any API key —
+   it returns a deterministic, template-based mock and labels it as such
+   everywhere in the UI.
+======================================================================== */
+const AIService = {
+  generateAssignmentQuestions(lecture, config){
+    return new Promise(resolve=>{
+      setTimeout(()=>resolve(mockGenerateQuestions(lecture, config)), 500);
+    });
+  },
+};
+
+function getLectureContentSources(lecture){
+  const objectives = (lecture.objectives||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const transcript = (lecture.transcript||'').trim();
+  const notes = (lecture.referenceNotes||'').trim();
+  const description = (lecture.description||'').trim();
+  const sufficient = objectives.length>0 || notes.length>=15 || description.length>=15 || transcript.length>=15;
+  return {
+    objectives, transcript, notes, description, sufficient,
+    hasObjectives: objectives.length>0, hasNotes: !!notes, hasDescription: !!description, hasTranscript: !!transcript,
+  };
+}
+
+/* Distractors only ever come from other lectures sharing the same board and
+   subject, so a question never mixes Karnataka State Board and CBSE content. */
+function getDistractorPool(board, subject, excludeLectureId){
+  const lectures = load(SK.lectures, []).filter(l=>l.board===board && l.subject===subject && l.id!==excludeLectureId);
+  const pool = [];
+  lectures.forEach(l=>(l.objectives||'').split('\n').map(s=>s.trim()).filter(Boolean).forEach(o=>pool.push(o)));
+  return uniqueSorted(pool);
+}
+
+function shuffleCopy(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+  return a;
+}
+
+const GENERIC_DISTRACTORS = ['This is not covered in this lecture.', 'This belongs to a different chapter.', 'This is not related to this topic.'];
+
+function buildMcqQuestion(fact, band, lecture, distractorPool){
+  const wrongPool = shuffleCopy(distractorPool.filter(o=>o!==fact));
+  const distractors = wrongPool.slice(0,3);
+  while(distractors.length<3) distractors.push(GENERIC_DISTRACTORS[distractors.length % GENERIC_DISTRACTORS.length]);
+  const options = shuffleCopy([fact, ...distractors]);
+  const correctIndex = options.indexOf(fact);
+  const stem = (band.key==='foundation'||band.key==='elementary')
+    ? `Which one of these is correct about "${lecture.topic}"?`
+    : `Which of the following best matches a learning point from this lecture on "${lecture.topic}"?`;
+  return {
+    id:uid('q'), type:'mcq', text:stem, options, correctIndex, suggestedAnswer:fact,
+    markingScheme:`Award full marks (${band.marks.mcq}) for selecting option ${String.fromCharCode(65+correctIndex)}; 0 marks otherwise.`,
+    topicTag:lecture.topic, difficulty:'easy', marks:band.marks.mcq,
+    sourceLectureId:lecture.id, sourceChapter:lecture.chapter, sourceTopic:lecture.topic, sourceBoard:lecture.board, sourceClass:lecture.class, sourceSubject:lecture.subject,
+    generatedFrom:'objectives',
+  };
+}
+
+function buildShortQuestion(contentLine, band, lecture, sourceField){
+  const stem = band.key==='foundation' ? `In your own words, say what you learned about: ${contentLine}`
+    : band.key==='elementary' ? `Explain briefly: ${contentLine}`
+    : band.key==='intermediate' ? `Explain with an example: ${contentLine}`
+    : `Explain in detail, giving reasons: ${contentLine}`;
+  return {
+    id:uid('q'), type:'short', text:stem, suggestedAnswer:contentLine,
+    markingScheme:`Award up to ${band.marks.short} marks: full marks for a correct, clear explanation related to "${lecture.topic}" (expected length: ${band.answerLength}); partial marks for a partially correct attempt.`,
+    topicTag:lecture.topic, difficulty:'medium', marks:band.marks.short,
+    sourceLectureId:lecture.id, sourceChapter:lecture.chapter, sourceTopic:lecture.topic, sourceBoard:lecture.board, sourceClass:lecture.class, sourceSubject:lecture.subject,
+    generatedFrom:sourceField,
+  };
+}
+
+function buildLongQuestion(combinedText, band, lecture){
+  const stem = band.key==='secondary'
+    ? `Discuss in detail, with reasoning and examples: ${lecture.topic} (${lecture.chapter}).`
+    : `Describe in a short paragraph: ${lecture.topic} (${lecture.chapter}).`;
+  const low = Math.ceil(band.marks.long*0.3), mid = Math.ceil(band.marks.long*0.7);
+  return {
+    id:uid('q'), type:'long', text:stem, suggestedAnswer:combinedText,
+    markingScheme:`Award up to ${band.marks.long} marks in bands — 0-${low}: minimal or incorrect attempt; ${low+1}-${mid}: partially correct with some reasoning; ${mid+1}-${band.marks.long}: complete, well-reasoned answer covering "${lecture.topic}" (expected length: ${band.answerLength}).`,
+    topicTag:lecture.topic, difficulty:'hard', marks:band.marks.long,
+    sourceLectureId:lecture.id, sourceChapter:lecture.chapter, sourceTopic:lecture.topic, sourceBoard:lecture.board, sourceClass:lecture.class, sourceSubject:lecture.subject,
+    generatedFrom:'combined',
+  };
+}
+
+function randInt(min, max){ return Math.floor(Math.random()*(max-min+1))+min; }
+
+/* Picks a numeric-problem template from the lecture's own chapter/topic text,
+   so a "sum" is at least topically grounded even though the specific numbers
+   are generated, not drawn from lecture content (arithmetic has no source
+   text to draw from — the correct answer is computed directly, so it is
+   never a fabricated fact). Mathematics only. */
+function detectMathTemplate(lecture){
+  const t = (lecture.topic+' '+lecture.chapter).toLowerCase();
+  if(t.includes('fraction')) return 'fraction';
+  if(t.includes('multipl')) return 'multiplication';
+  if(t.includes('divi')) return 'division';
+  if(t.includes('data') || t.includes('mean') || t.includes('median') || t.includes('mode')) return 'data';
+  if(t.includes('percent')) return 'percentage';
+  if(t.includes('subtract')) return 'subtraction';
+  return 'addition';
+}
+
+function buildSumQuestion(lecture, band, idx){
+  const template = detectMathTemplate(lecture);
+  const digitRange = band.key==='foundation' ? [1,9] : band.key==='elementary' ? [2,30] : band.key==='intermediate' ? [10,99] : [10,999];
+  let text, answer;
+  switch(template){
+    case 'fraction': {
+      const den = randInt(4,10);
+      const a = randInt(1,den-1);
+      const b = randInt(1, den-a);
+      text = `Add: ${a}/${den} + ${b}/${den} = ?`;
+      answer = (a+b===den) ? `${a+b}/${den} (= 1 whole)` : `${a+b}/${den}`;
+      break;
+    }
+    case 'multiplication': {
+      const a = randInt(digitRange[0], digitRange[1]), b = randInt(2,12);
+      text = `Multiply: ${a} x ${b} = ?`; answer = String(a*b);
+      break;
+    }
+    case 'division': {
+      const b = randInt(2,12), ans = randInt(digitRange[0], digitRange[1]);
+      text = `Divide: ${ans*b} / ${b} = ?`; answer = String(ans);
+      break;
+    }
+    case 'data': {
+      const nums = Array.from({length:5}, ()=>randInt(1,20)).sort((x,y)=>x-y);
+      const mean = nums.reduce((s,v)=>s+v,0)/5;
+      text = `For the data set ${nums.join(', ')} — find the mean and the median.`;
+      answer = `Mean = ${Number.isInteger(mean)?mean:mean.toFixed(1)}, Median = ${nums[2]}`;
+      break;
+    }
+    case 'percentage': {
+      const whole = randInt(50,500), pct = [10,20,25,50][randInt(0,3)];
+      text = `Find ${pct}% of ${whole}.`; answer = String(whole*pct/100);
+      break;
+    }
+    case 'subtraction': {
+      let a = randInt(digitRange[0], digitRange[1]), b = randInt(digitRange[0], digitRange[1]);
+      if(b>a) [a,b] = [b,a];
+      text = `Subtract: ${a} - ${b} = ?`; answer = String(a-b);
+      break;
+    }
+    default: {
+      const a = randInt(digitRange[0], digitRange[1]), b = randInt(digitRange[0], digitRange[1]);
+      text = `Add: ${a} + ${b} = ?`; answer = String(a+b);
+    }
+  }
+  return {
+    id:uid('q'), type:'sum', text:`Based on this lecture's topic (${lecture.topic}): ${text}`, suggestedAnswer:answer,
+    markingScheme:`Award full marks (${band.marks.sum}) for the correct final answer with working shown; partial marks for correct method with a calculation slip.`,
+    topicTag:lecture.topic, difficulty:idx===0?'easy':'medium', marks:band.marks.sum,
+    sourceLectureId:lecture.id, sourceChapter:lecture.chapter, sourceTopic:lecture.topic, sourceBoard:lecture.board, sourceClass:lecture.class, sourceSubject:lecture.subject,
+    generatedFrom:'computed',
+  };
+}
+
+/* The mock "AI": every question is derived only from this lecture's own
+   objectives / notes / description / transcript — never invented, and never
+   from the YouTube link itself. Returns {ok:false} when there isn't enough
+   source content to generate from. */
+function mockGenerateQuestions(lecture, config){
+  const sources = getLectureContentSources(lecture);
+  if(!sources.sufficient) return {ok:false, reason:'insufficient_content'};
+
+  const band = getClassBand(lecture.class);
+  const questions = [];
+  const distractorPool = getDistractorPool(lecture.board, lecture.subject, lecture.id);
+  const factPool = sources.objectives.length ? sources.objectives : [sources.notes || sources.description || lecture.topic];
+  for(let i=0;i<config.mcqCount;i++){
+    questions.push(buildMcqQuestion(factPool[i % factPool.length], band, lecture, distractorPool.length?distractorPool:factPool));
+  }
+
+  const shortField = sources.objectives.length ? 'objectives' : (sources.notes ? 'referenceNotes' : 'description');
+  const shortPool = sources.objectives.length ? sources.objectives : [sources.notes, sources.description].filter(Boolean);
+  for(let i=0;i<config.shortCount;i++){
+    const content = shortPool.length ? shortPool[i % shortPool.length] : lecture.topic;
+    questions.push(buildShortQuestion(content, band, lecture, shortField));
+  }
+
+  if(band.allowedTypes.includes('long') && config.longCount>0){
+    const combined = [sources.notes, sources.description, sources.objectives.join('; ')].filter(Boolean).join(' ') || lecture.topic;
+    for(let i=0;i<config.longCount;i++) questions.push(buildLongQuestion(combined, band, lecture));
+  }
+
+  if(lecture.subject==='Mathematics' && config.sumCount>0){
+    for(let i=0;i<config.sumCount;i++) questions.push(buildSumQuestion(lecture, band, i));
+  }
+
+  return {
+    ok:true, questions,
+    contentSources:{usedTranscript:sources.hasTranscript, usedNotes:sources.hasNotes, usedObjectives:sources.hasObjectives, usedDescription:sources.hasDescription},
+  };
+}
+
+VIEWS.generator = function(){
+  if(!isTeacherOrAdmin()){
+    return `
+      <div class="section-title">Assignment Generator</div>
+      <div class="section-sub">Generate draft assignments from a lecture's existing content.</div>
+      <div class="info-banner">${ico('shield')}<div>This tool is available to teachers and administrators.</div></div>`;
+  }
+  const lectures = load(SK.lectures, []);
+  return `
+    <div class="section-title">Assignment Generator <span class="demo-label">Demo mock AI</span></div>
+    <div class="section-sub">Generate a draft assignment from a lecture's own content — objectives, reference notes, description or transcript. The YouTube link itself is never used as content.</div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Step 1 — Select a Lecture</h3></div>
+      ${!lectures.length ? emptyState('generator','No lectures yet. Add one on the Lectures page first.') : `
+      <div class="field">
+        <label>Lecture</label>
+        <select id="gen-lecture-select">
+          <option value="">Select a lecture...</option>
+          ${lectures.map(l=>`<option value="${l.id}">${escapeHtml(l.title)} — ${boardLabel(l.board)} · Class ${l.class} · ${escapeHtml(l.subject)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="gen-content-check"></div>`}
+    </div>
+
+    <div id="gen-config-card"></div>
+    <div id="gen-draft-card"></div>
+
+    <div class="card">
+      <div class="card-head"><h3>Generated Assignments</h3></div>
+      <div id="gen-list-wrap"></div>
+    </div>`;
+};
+
+function renderGenContentCheck(lecture){
+  const box = $('#gen-content-check'); if(!box) return;
+  if(!lecture){ box.innerHTML=''; $('#gen-config-card').innerHTML=''; return; }
+  const s = getLectureContentSources(lecture);
+  const row = (label, ok, extra)=>`<div style="display:flex;align-items:center;gap:8px;">
+    <span class="pill ${ok?'pill-evaluated':'pill-neutral'}">${ok?'Available':'Not provided'}</span>
+    <span style="font-size:12.5px;color:var(--text-600);">${label}${extra?' ('+extra+')':''}</span>
+  </div>`;
+  box.innerHTML = `
+    <div class="card" style="background:var(--bg);margin-top:4px;">
+      <div style="font-weight:650;font-size:13px;margin-bottom:8px;">Content available for generation</div>
+      <div style="display:grid;gap:6px;">
+        ${row('Learning objectives', s.hasObjectives, s.objectives.length+' entries')}
+        ${row('Reference notes', s.hasNotes)}
+        ${row('Description', s.hasDescription)}
+        ${row('Transcript', s.hasTranscript)}
+      </div>
+      <p class="hint" style="margin-top:8px;">The YouTube link itself is never treated as content — only the fields above are used.</p>
+      ${!s.sufficient?`<div class="info-banner" style="margin-top:10px;margin-bottom:0;">${ico('shield')}<div><b>Not enough content yet.</b> Add learning objectives, reference notes or a description to this lecture on the Lectures page before generating questions.</div></div>`:''}
+    </div>`;
+  renderGenConfigCard(lecture, s.sufficient);
+}
+
+function renderGenConfigCard(lecture, sufficient){
+  const box = $('#gen-config-card'); if(!box) return;
+  if(!lecture || !sufficient){ box.innerHTML=''; return; }
+  const band = getClassBand(lecture.class);
+  const allowLong = band.allowedTypes.includes('long');
+  const isMath = lecture.subject === 'Mathematics';
+  box.innerHTML = `
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Step 2 — Configure Questions</h3></div>
+      <p class="hint" style="margin-bottom:12px;">Adapted for ${escapeHtml(band.label)}: ${escapeHtml(band.style)}. Expected answer length: ${escapeHtml(band.answerLength)}.</p>
+      <div class="field-row">
+        <div class="field"><label>Multiple-choice questions</label><input type="number" id="gen-mcq-count" min="0" max="10" value="3"></div>
+        <div class="field"><label>Short-answer questions</label><input type="number" id="gen-short-count" min="0" max="10" value="2"></div>
+        ${allowLong?`<div class="field"><label>Long-answer questions</label><input type="number" id="gen-long-count" min="0" max="5" value="1"></div>`:''}
+        ${isMath?`<div class="field"><label>Numeric problems (sums)</label><input type="number" id="gen-sum-count" min="0" max="10" value="3"></div>`:''}
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Marks per MCQ</label><input type="number" id="gen-mcq-marks" min="1" max="10" value="${band.marks.mcq}"></div>
+        <div class="field"><label>Marks per short answer</label><input type="number" id="gen-short-marks" min="1" max="20" value="${band.marks.short}"></div>
+        ${allowLong?`<div class="field"><label>Marks per long answer</label><input type="number" id="gen-long-marks" min="1" max="30" value="${band.marks.long}"></div>`:''}
+        ${isMath?`<div class="field"><label>Marks per sum</label><input type="number" id="gen-sum-marks" min="1" max="20" value="${band.marks.sum}"></div>`:''}
+      </div>
+      ${isMath?`<p class="hint" style="margin-bottom:12px;">Numeric problems are computed arithmetic practice (e.g. addition, fractions, data handling) related to this lecture's topic — the numbers are generated, and the answer is calculated directly, not drawn from lecture text.</p>`:''}
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <b id="gen-total-marks-preview"></b>
+        <button type="button" class="btn btn-primary" id="gen-generate-btn">${ico('plus')} Generate Assignment (Demo)</button>
+      </div>
+    </div>`;
+  const updatePreview = ()=>{
+    const mc=Number($('#gen-mcq-count')?.value||0), mm=Number($('#gen-mcq-marks')?.value||0);
+    const sc=Number($('#gen-short-count')?.value||0), sm=Number($('#gen-short-marks')?.value||0);
+    const lc=allowLong?Number($('#gen-long-count')?.value||0):0, lm=allowLong?Number($('#gen-long-marks')?.value||0):0;
+    const sumc=isMath?Number($('#gen-sum-count')?.value||0):0, summ=isMath?Number($('#gen-sum-marks')?.value||0):0;
+    const totalQ=mc+sc+lc+sumc, totalM=mc*mm+sc*sm+lc*lm+sumc*summ;
+    const el=$('#gen-total-marks-preview'); if(el) el.textContent = `Total: ${totalQ} question${totalQ===1?'':'s'} · ${totalM} marks`;
+  };
+  updatePreview();
+  ['gen-mcq-count','gen-short-count','gen-long-count','gen-mcq-marks','gen-short-marks','gen-long-marks','gen-sum-count','gen-sum-marks'].forEach(id=>{
+    const el=$('#'+id); if(el) el.addEventListener('input', updatePreview);
+  });
+  $('#gen-generate-btn').addEventListener('click', ()=>handleGenerateAssignment(lecture, band, allowLong, isMath));
+}
+
+async function handleGenerateAssignment(lecture, band, allowLong, isMath){
+  const btn = $('#gen-generate-btn');
+  const config = {
+    mcqCount: Number($('#gen-mcq-count').value)||0,
+    shortCount: Number($('#gen-short-count').value)||0,
+    longCount: allowLong ? (Number($('#gen-long-count').value)||0) : 0,
+    sumCount: isMath ? (Number($('#gen-sum-count').value)||0) : 0,
+    marksOverride: {
+      mcq: Number($('#gen-mcq-marks').value)||band.marks.mcq,
+      short: Number($('#gen-short-marks').value)||band.marks.short,
+      long: allowLong ? (Number($('#gen-long-marks').value)||band.marks.long) : 0,
+      sum: isMath ? (Number($('#gen-sum-marks').value)||band.marks.sum) : band.marks.sum,
+    },
+  };
+  if(config.mcqCount+config.shortCount+config.longCount+config.sumCount<=0){ toast('Choose at least one question to generate.','error'); return; }
+
+  btn.disabled = true; btn.textContent = 'Generating demo questions...';
+  const result = await AIService.generateAssignmentQuestions(lecture, config);
+  btn.disabled = false; btn.innerHTML = `${ico('plus')} Generate Assignment (Demo)`;
+
+  if(!result.ok){ toast('Not enough lecture content to generate questions from.','error'); return; }
+  result.questions.forEach(q=>{ q.marks = config.marksOverride[q.type] ?? q.marks; });
+
+  const record = {
+    id:uid('genasg'), lectureId:lecture.id, title:lecture.title+' — Assignment',
+    board:lecture.board, class:lecture.class, subject:lecture.subject, chapter:lecture.chapter, topic:lecture.topic, year:lecture.year||DEFAULT_ACADEMIC_YEAR,
+    config, questions:result.questions, contentSources:result.contentSources,
+    status:'Draft', linkedAssignmentId:null, dueDate:daysFromNow(7), generatedBy:'demo-mock-ai',
+    createdAt:new Date().toISOString(), updatedAt:new Date().toISOString(),
+  };
+  const all = load(SK.generatedAssignments, []);
+  all.push(record);
+  save(SK.generatedAssignments, all);
+  GeneratorState.openAssignmentId = record.id;
+  toast('Demo assignment generated — review before publishing.','success');
+  renderGenDraftCard();
+  renderGenList();
+  $('#gen-draft-card').scrollIntoView({behavior:'smooth'});
+}
+
+function renderGenQuestionCard(q, idx){
+  const typeLabel = q.type==='mcq'?'Multiple Choice':q.type==='short'?'Short Answer':q.type==='sum'?'Numeric Problem':'Long Answer';
+  return `<div class="card" data-qid="${q.id}" style="background:var(--bg);">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+      <div class="badge-row">
+        <span class="meta-chip">Q${idx+1} · ${typeLabel}</span>
+        <span class="meta-chip">Marks: <input type="number" class="gen-q-marks" data-id="${q.id}" value="${q.marks}" min="1" style="width:46px;border:none;background:transparent;font-weight:650;padding:0;"></span>
+      </div>
+      <button type="button" class="btn btn-icon btn-ghost gen-q-delete" data-id="${q.id}" title="Remove question" aria-label="Remove question">${ico('trash')}</button>
+    </div>
+    <div class="field"><label>Question</label><textarea class="gen-q-text" data-id="${q.id}">${escapeHtml(q.text)}</textarea></div>
+    ${q.type==='mcq'?`
+    <div class="field"><label>Options (select the correct one)</label>
+      ${q.options.map((opt,oi)=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+        <input type="radio" name="gen-correct-${q.id}" class="gen-q-correct" data-id="${q.id}" data-idx="${oi}" ${oi===q.correctIndex?'checked':''}>
+        <input type="text" class="gen-q-option" data-id="${q.id}" data-idx="${oi}" value="${escapeHtml(opt)}" style="flex:1;">
+      </div>`).join('')}
+    </div>`:`
+    <div class="field"><label>${q.type==='sum'?'Correct Answer':'Suggested Answer'}</label><textarea class="gen-q-suggested" data-id="${q.id}">${escapeHtml(q.suggestedAnswer)}</textarea></div>`}
+    <div class="field"><label>Marking Scheme</label><textarea class="gen-q-marking" data-id="${q.id}">${escapeHtml(q.markingScheme)}</textarea></div>
+    <div class="field-row">
+      <div class="field"><label>Topic Tag</label><input type="text" class="gen-q-topic" data-id="${q.id}" value="${escapeHtml(q.topicTag)}"></div>
+      <div class="field"><label>Difficulty</label><select class="gen-q-difficulty" data-id="${q.id}">
+        ${['easy','medium','hard'].map(d=>`<option value="${d}" ${d===q.difficulty?'selected':''}>${d[0].toUpperCase()+d.slice(1)}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="hint">Source: ${escapeHtml(q.sourceChapter)} · ${escapeHtml(q.sourceTopic)} (${boardLabel(q.sourceBoard)}, Class ${q.sourceClass})</div>
+  </div>`;
+}
+
+/* Printable output (via the browser's own Print dialog -> Save as PDF — no
+   external PDF library). The question paper never includes answers, since
+   it's meant to be handed to students physically; the answer key is a
+   separate teacher-only printout. */
+function printLines(n){ return Array.from({length:n}).map(()=>'<div class="print-line"></div>').join(''); }
+
+function buildQuestionPaperHtml(a){
+  const totalMarks = a.questions.reduce((s,q)=>s+(Number(q.marks)||0),0);
+  return `<div class="print-paper">
+    <h1>${escapeHtml(a.title)}</h1>
+    <div class="print-meta">${boardLabel(a.board)} &middot; Class ${a.class} &middot; ${escapeHtml(a.subject)} &middot; ${escapeHtml(a.chapter)}</div>
+    <div class="print-meta">Total Marks: ${totalMarks} &nbsp;&nbsp; Time: _________</div>
+    <div class="print-meta">Student Name: ______________________________ &nbsp;&nbsp; Roll No: ___________</div>
+    <hr>
+    <ol class="print-questions">
+      ${a.questions.map(q=>`<li>
+        <div class="print-q-text">${escapeHtml(q.text)} <span class="print-marks">[${q.marks} mark${q.marks===1?'':'s'}]</span></div>
+        ${q.type==='mcq'
+          ? `<ol class="print-options">${q.options.map(opt=>`<li>${escapeHtml(opt)}</li>`).join('')}</ol>`
+          : `<div class="print-answer-space">${printLines(q.type==='long'?6:3)}</div>`}
+      </li>`).join('')}
+    </ol>
+  </div>`;
+}
+
+function buildAnswerKeyHtml(a){
+  const totalMarks = a.questions.reduce((s,q)=>s+(Number(q.marks)||0),0);
+  return `<div class="print-paper">
+    <h1>${escapeHtml(a.title)} — Answer Key</h1>
+    <div class="print-meta">${boardLabel(a.board)} &middot; Class ${a.class} &middot; ${escapeHtml(a.subject)} &middot; ${escapeHtml(a.chapter)}</div>
+    <div class="print-meta">Total Marks: ${totalMarks} &middot; Teacher reference only — not for distribution to students</div>
+    <hr>
+    <ol class="print-questions">
+      ${a.questions.map(q=>`<li>
+        <div class="print-q-text">${escapeHtml(q.text)} <span class="print-marks">[${q.marks} mark${q.marks===1?'':'s'}]</span></div>
+        <div class="print-answer">${q.type==='mcq'
+          ? `<b>Correct answer:</b> ${String.fromCharCode(65+q.correctIndex)}. ${escapeHtml(q.options[q.correctIndex])}`
+          : `<b>Suggested answer:</b> ${escapeHtml(q.suggestedAnswer)}`}</div>
+        <div class="print-marking"><b>Marking scheme:</b> ${escapeHtml(q.markingScheme)}</div>
+        <div class="print-source">Source: ${escapeHtml(q.sourceChapter)} &middot; ${escapeHtml(q.sourceTopic)} (${boardLabel(q.sourceBoard)}, Class ${q.sourceClass})</div>
+      </li>`).join('')}
+    </ol>
+  </div>`;
+}
+
+function printAssignmentPaper(record, withAnswers){
+  if(!record.questions.length){ toast('This assignment has no questions to print.','error'); return; }
+  $('#print-area').innerHTML = withAnswers ? buildAnswerKeyHtml(record) : buildQuestionPaperHtml(record);
+  window.print();
+}
+
+function renderGenDraftCard(){
+  const box = $('#gen-draft-card'); if(!box) return;
+  const id = GeneratorState.openAssignmentId;
+  if(!id){ box.innerHTML=''; return; }
+  const all = load(SK.generatedAssignments, []);
+  const a = all.find(x=>x.id===id);
+  if(!a){ box.innerHTML=''; GeneratorState.openAssignmentId=null; return; }
+  const totalMarks = a.questions.reduce((s,q)=>s+(Number(q.marks)||0),0);
+  const statusPill = a.status==='Published'?'pill-evaluated':a.status==='Approved'?'pill-open':'pill-pending';
+  box.innerHTML = `
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head">
+        <div>
+          <h3>Draft Assignment <span class="pill ${statusPill}">${a.status}</span></h3>
+          <div class="hint">${boardLabel(a.board)} · Class ${a.class} · ${escapeHtml(a.subject)} · ${escapeHtml(a.chapter)} · ${escapeHtml(a.topic)}</div>
+        </div>
+        <div class="hint">${a.questions.length} question${a.questions.length===1?'':'s'} · ${totalMarks} marks</div>
+      </div>
+      <div class="info-banner">${ico('doubt')}<div>These questions were generated by a <b>demo mock AI</b> from this lecture's own content — not real AI output. Review and edit before approving or publishing.</div></div>
+      <div class="field"><label>Assignment Title</label><input type="text" id="gen-draft-title" value="${escapeHtml(a.title)}"></div>
+
+      <div id="gen-questions-list" style="display:flex;flex-direction:column;gap:14px;margin:14px 0;">
+        ${a.questions.length ? a.questions.map((q,idx)=>renderGenQuestionCard(q, idx)).join('') : '<p class="hint">No questions left in this draft. Regenerate or delete it.</p>'}
+      </div>
+
+      <div class="field"><label>Due Date (used when publishing)</label><input type="date" id="gen-draft-duedate" value="${(a.dueDate||daysFromNow(7)).slice(0,10)}"></div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary" id="gen-save-changes">Save Changes</button>
+        <button type="button" class="btn" id="gen-regenerate">Regenerate</button>
+        ${a.status==='Draft'?`<button type="button" class="btn" id="gen-approve">Approve</button>`:''}
+        ${a.status==='Approved'?`<button type="button" class="btn btn-primary" id="gen-publish">Publish to Assignments</button>`:''}
+        <button type="button" class="btn btn-danger" id="gen-discard">Delete Draft</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+        <button type="button" class="btn" id="gen-print-paper">${ico('link')} Print Question Paper (PDF)</button>
+        <button type="button" class="btn" id="gen-print-key">${ico('link')} Print Answer Key (PDF)</button>
+      </div>
+      <p class="hint" style="margin-top:6px;">Opens your browser's print dialog — choose "Save as PDF" as the destination, or print directly for handing out on paper.</p>
+    </div>`;
+  wireGenDraftCard(a.id);
+}
+
+function wireGenDraftCard(assignmentId){
+  $('#gen-questions-list').addEventListener('click', function(e){
+    const btn = e.target.closest('.gen-q-delete'); if(!btn) return;
+    const all = load(SK.generatedAssignments, []);
+    const rec = all.find(x=>x.id===assignmentId); if(!rec) return;
+    rec.questions = rec.questions.filter(q=>q.id!==btn.dataset.id);
+    save(SK.generatedAssignments, all);
+    renderGenDraftCard(); renderGenList();
+  });
+
+  $('#gen-save-changes').addEventListener('click', function(){
+    const all = load(SK.generatedAssignments, []);
+    const rec = all.find(x=>x.id===assignmentId); if(!rec) return;
+    rec.title = $('#gen-draft-title').value.trim() || rec.title;
+    const dueVal = $('#gen-draft-duedate').value;
+    if(dueVal) rec.dueDate = new Date(dueVal).toISOString();
+    rec.questions.forEach(q=>{
+      const textEl = document.querySelector(`.gen-q-text[data-id="${q.id}"]`); if(textEl) q.text = textEl.value;
+      const marksEl = document.querySelector(`.gen-q-marks[data-id="${q.id}"]`); if(marksEl) q.marks = Number(marksEl.value)||q.marks;
+      const topicEl = document.querySelector(`.gen-q-topic[data-id="${q.id}"]`); if(topicEl) q.topicTag = topicEl.value;
+      const diffEl = document.querySelector(`.gen-q-difficulty[data-id="${q.id}"]`); if(diffEl) q.difficulty = diffEl.value;
+      const markingEl = document.querySelector(`.gen-q-marking[data-id="${q.id}"]`); if(markingEl) q.markingScheme = markingEl.value;
+      if(q.type==='mcq'){
+        document.querySelectorAll(`.gen-q-option[data-id="${q.id}"]`).forEach(optEl=>{ q.options[Number(optEl.dataset.idx)] = optEl.value; });
+        const correctEl = document.querySelector(`.gen-q-correct[data-id="${q.id}"]:checked`);
+        if(correctEl) q.correctIndex = Number(correctEl.dataset.idx);
+        q.suggestedAnswer = q.options[q.correctIndex];
+      } else {
+        const suggEl = document.querySelector(`.gen-q-suggested[data-id="${q.id}"]`); if(suggEl) q.suggestedAnswer = suggEl.value;
+      }
+    });
+    rec.updatedAt = new Date().toISOString();
+    save(SK.generatedAssignments, all);
+    toast('Draft changes saved.','success');
+    renderGenDraftCard(); renderGenList();
+  });
+
+  $('#gen-regenerate').addEventListener('click', function(){
+    confirmAction('Regenerate questions?','This replaces all current questions in this draft with a new demo-generated set using the same configuration. Manual edits will be lost.', async ()=>{
+      const all = load(SK.generatedAssignments, []);
+      const rec = all.find(x=>x.id===assignmentId); if(!rec) return;
+      const lecture = load(SK.lectures, []).find(l=>l.id===rec.lectureId);
+      if(!lecture){ toast('Source lecture not found.','error'); return; }
+      const result = await AIService.generateAssignmentQuestions(lecture, rec.config);
+      if(!result.ok){ toast('Not enough lecture content to regenerate.','error'); return; }
+      result.questions.forEach(q=>{ q.marks = rec.config.marksOverride[q.type] ?? q.marks; });
+      rec.questions = result.questions; rec.contentSources = result.contentSources; rec.updatedAt = new Date().toISOString();
+      save(SK.generatedAssignments, all);
+      toast('Questions regenerated.','success');
+      renderGenDraftCard(); renderGenList();
+    });
+  });
+
+  $('#gen-approve')?.addEventListener('click', function(){
+    const all = load(SK.generatedAssignments, []);
+    const rec = all.find(x=>x.id===assignmentId); if(!rec) return;
+    rec.status = 'Approved'; rec.updatedAt = new Date().toISOString();
+    save(SK.generatedAssignments, all);
+    toast('Assignment approved.','success');
+    renderGenDraftCard(); renderGenList();
+  });
+
+  $('#gen-publish')?.addEventListener('click', function(){
+    const all = load(SK.generatedAssignments, []);
+    const rec = all.find(x=>x.id===assignmentId); if(!rec) return;
+    const dueVal = $('#gen-draft-duedate').value;
+    rec.dueDate = dueVal ? new Date(dueVal).toISOString() : (rec.dueDate || daysFromNow(7));
+    let assignments = load(SK.assignments, []);
+    const isOverdue = new Date(rec.dueDate) < new Date();
+    if(rec.linkedAssignmentId && assignments.some(x=>x.id===rec.linkedAssignmentId)){
+      assignments = assignments.map(x=>x.id===rec.linkedAssignmentId ? {...x, title:rec.title, board:rec.board, class:rec.class, subject:rec.subject, chapter:rec.chapter, lectureId:rec.lectureId, dueDate:rec.dueDate, status:isOverdue?'Overdue':'Open'} : x);
+    } else {
+      const newAsg = {id:uid('asg'), title:rec.title, board:rec.board, class:rec.class, subject:rec.subject, chapter:rec.chapter, lectureId:rec.lectureId, dueDate:rec.dueDate, status:isOverdue?'Overdue':'Open', source:'generated'};
+      assignments.push(newAsg);
+      rec.linkedAssignmentId = newAsg.id;
+    }
+    save(SK.assignments, assignments);
+    rec.status = 'Published'; rec.updatedAt = new Date().toISOString();
+    save(SK.generatedAssignments, all);
+    toast('Assignment published — visible on the Assignments page.','success');
+    renderGenDraftCard(); renderGenList();
+  });
+
+  $('#gen-discard').addEventListener('click', function(){
+    confirmAction('Delete this draft?','This removes the generated assignment draft. Already-published entries on the Assignments page are not affected.', ()=>{
+      save(SK.generatedAssignments, load(SK.generatedAssignments, []).filter(x=>x.id!==assignmentId));
+      GeneratorState.openAssignmentId = null;
+      toast('Draft deleted.','success');
+      renderGenDraftCard(); renderGenList();
+    }, true);
+  });
+
+  $('#gen-print-paper').addEventListener('click', function(){
+    const rec = load(SK.generatedAssignments, []).find(x=>x.id===assignmentId); if(!rec) return;
+    printAssignmentPaper(rec, false);
+  });
+  $('#gen-print-key').addEventListener('click', function(){
+    const rec = load(SK.generatedAssignments, []).find(x=>x.id===assignmentId); if(!rec) return;
+    printAssignmentPaper(rec, true);
+  });
+}
+
+function renderGenList(){
+  const wrap = $('#gen-list-wrap'); if(!wrap) return;
+  const all = load(SK.generatedAssignments, []).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  if(!all.length){ wrap.innerHTML = emptyState('generator','No generated assignments yet.'); return; }
+  wrap.innerHTML = `<table><thead><tr><th>Title</th><th>Board/Class</th><th>Subject</th><th>Questions</th><th>Marks</th><th>Status</th><th></th></tr></thead><tbody>
+    ${all.map(a=>{
+      const marks = a.questions.reduce((s,q)=>s+(Number(q.marks)||0),0);
+      const statusPill = a.status==='Published'?'pill-evaluated':a.status==='Approved'?'pill-open':'pill-pending';
+      return `<tr>
+        <td>${escapeHtml(a.title)}</td><td>${boardLabel(a.board)} · Class ${a.class}</td><td>${escapeHtml(a.subject)}</td>
+        <td>${a.questions.length}</td><td>${marks}</td>
+        <td><span class="pill ${statusPill}">${a.status}</span></td>
+        <td class="row-actions">
+          <button class="btn btn-sm" data-action="gen-open" data-id="${a.id}">Open</button>
+          <button class="btn btn-sm" data-action="gen-print" data-id="${a.id}">Print</button>
+          <button class="btn btn-icon btn-ghost" data-action="gen-delete" data-id="${a.id}" title="Delete" aria-label="Delete">${ico('trash')}</button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+PAGE_INIT.generator = function(){
+  if(!isTeacherOrAdmin()) return;
+  GeneratorState.openAssignmentId = null;
+
+  const sel = $('#gen-lecture-select');
+  if(sel){
+    sel.addEventListener('change', function(){
+      GeneratorState.openAssignmentId = null;
+      $('#gen-draft-card').innerHTML = '';
+      const lecture = load(SK.lectures, []).find(l=>l.id===this.value);
+      renderGenContentCheck(lecture);
+    });
+  }
+
+  $('#gen-list-wrap')?.addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action]'); if(!btn) return;
+    const id = btn.dataset.id;
+    if(btn.dataset.action==='gen-open'){
+      GeneratorState.openAssignmentId = id;
+      const rec = load(SK.generatedAssignments, []).find(x=>x.id===id);
+      if(rec && sel){
+        sel.value = rec.lectureId;
+        renderGenContentCheck(load(SK.lectures, []).find(l=>l.id===rec.lectureId));
+      }
+      renderGenDraftCard();
+      $('#gen-draft-card').scrollIntoView({behavior:'smooth'});
+    }
+    if(btn.dataset.action==='gen-print'){
+      const rec = load(SK.generatedAssignments, []).find(x=>x.id===id); if(!rec) return;
+      printAssignmentPaper(rec, false);
+    }
+    if(btn.dataset.action==='gen-delete'){
+      confirmAction('Delete generated assignment?','This removes the draft record. Already-published entries on the Assignments page are not affected.', ()=>{
+        save(SK.generatedAssignments, load(SK.generatedAssignments, []).filter(x=>x.id!==id));
+        if(GeneratorState.openAssignmentId===id){ GeneratorState.openAssignmentId=null; $('#gen-draft-card').innerHTML=''; }
+        toast('Generated assignment deleted.','success');
+        renderGenList();
+      }, true);
+    }
+  });
+
+  renderGenList();
 };
 
 /* ========================================================================
