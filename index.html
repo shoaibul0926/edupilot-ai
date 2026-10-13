@@ -913,12 +913,24 @@ VIEWS.overview = function(){
         <div class="bar-row"><div>${escapeHtml(r.label)}</div>
         <div class="bar-track"><div class="bar-fill" style="width:${r.value}%"></div></div>
         <div class="bar-val">${r.value}%</div></div>`).join('')}</div>` : emptyState('performance','No evaluated submissions yet.')}
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <div class="card-head"><h3>Curriculum Map <span class="demo-label">Illustrative</span></h3></div>
+      <p class="hint" style="margin-bottom:12px;">Every subject, with its sample chapters, laid out in order from Class 1 to Class 10 for the selected board.</p>
+      <div class="field" style="max-width:320px;"><label>Board</label><select id="cur-map-board">${boardOptions(CurriculumMapState.board)}</select></div>
+      <div id="cur-map-classes"></div>
     </div>`;
 };
 
 function emptyState(icon, text){
   return `<div class="empty-state">${ico(icon)}<h4>${escapeHtml(text)}</h4><p>Try adding a demo record from this section.</p></div>`;
 }
+
+PAGE_INIT.overview = function(){
+  wireCurriculumMapControls();
+  renderCurriculumMap();
+};
 
 /* ========================================================================
    CURRICULUM
@@ -976,6 +988,19 @@ function curriculumSubjectRefresh(form){
   form.subject.innerHTML = subjectOptions(board, cls, current);
 }
 
+function wireCurriculumMapControls(){
+  $('#cur-map-board').addEventListener('change', function(){
+    CurriculumMapState.board = this.value;
+    renderCurriculumMap();
+  });
+  $('#cur-map-classes').addEventListener('click', function(e){
+    const row = e.target.closest('[data-action="cur-map-toggle"]'); if(!row) return;
+    const cls = Number(row.dataset.cls);
+    if(CurriculumMapState.expanded.has(cls)) CurriculumMapState.expanded.delete(cls); else CurriculumMapState.expanded.add(cls);
+    renderCurriculumMap();
+  });
+}
+
 function renderCurriculumMap(){
   const box = $('#cur-map-classes'); if(!box) return;
   const board = CurriculumMapState.board;
@@ -1030,17 +1055,8 @@ function renderCurriculumTable(){
 }
 
 PAGE_INIT.curriculum = function(){
+  wireCurriculumMapControls();
   renderCurriculumMap();
-  $('#cur-map-board').addEventListener('change', function(){
-    CurriculumMapState.board = this.value;
-    renderCurriculumMap();
-  });
-  $('#cur-map-classes').addEventListener('click', function(e){
-    const row = e.target.closest('[data-action="cur-map-toggle"]'); if(!row) return;
-    const cls = Number(row.dataset.cls);
-    if(CurriculumMapState.expanded.has(cls)) CurriculumMapState.expanded.delete(cls); else CurriculumMapState.expanded.add(cls);
-    renderCurriculumMap();
-  });
 
   const form = $('#curriculum-form');
   curriculumSubjectRefresh(form);
