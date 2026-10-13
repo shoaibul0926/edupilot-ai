@@ -396,6 +396,9 @@ const ICONS = {
   shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 7.8-8 9-4.5-1.2-8-4-8-9V6l8-3z"/></svg>',
   link:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14L21 3M21 3h-6M21 3v6"/><path d="M5 12v7a2 2 0 0 0 2 2h7"/></svg>',
   generator:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20L15 9"/><path d="M17 3l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2z"/><path d="M19.5 12.5l.6 1.2 1.2.6-1.2.6-.6 1.2-.6-1.2-1.2-.6 1.2-.6.6-1.2z"/></svg>',
+  star:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.2 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.2 5.9-.9z"/></svg>',
+  starFilled:'<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.2 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.2 5.9-.9z"/></svg>',
+  compare:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v18M16 3v18"/><path d="M3 8h5M16 8h5M3 16h5M16 16h5"/></svg>',
 };
 function ico(name){ return `<span class="icon">${ICONS[name]||''}</span>`; }
 
@@ -410,6 +413,11 @@ const EXPLANATION_LANGUAGES = ['English','Hindi','Kannada'];
 const ACADEMIC_YEARS = ['2024-25','2025-26','2026-27','2027-28'];
 const DEFAULT_ACADEMIC_YEAR = '2026-27';
 const CLASS_LIST = [1,2,3,4,5,6,7,8,9,10];
+/* Reference Library (Phase 8) is scoped to CBSE only, per current platform
+   scope — new resources are not tagged to any other board. Pre-existing
+   library records from earlier phases may still carry a different board;
+   those are left as-is rather than deleted or silently reassigned. */
+const RESOURCE_TYPES = ['Textbook','Workbook','Video Lecture','Worksheet','Question Bank','Article','Other'];
 
 /* Returns every subject that appears anywhere across Classes 1-10 for the
    given board, regardless of which class is currently selected — teachers
@@ -680,12 +688,58 @@ function migrateLectureSchema(){
   const migrated = lectures.map(l=>{
     const withDefaults = {
       description:'', year:DEFAULT_ACADEMIC_YEAR, objectives:'', referenceNotes:'',
-      transcript:'', segments:[], ...l,
+      transcript:'', segments:[], attachedResourceIds:[], ...l,
     };
     if(Object.keys(withDefaults).length !== Object.keys(l).length) changed = true;
     return withDefaults;
   });
   if(changed) save(SK.lectures, migrated);
+}
+
+/* Backfills assignments saved before Phase 8 (attachedResourceIds), so a
+   teacher can attach Reference Library resources to any assignment,
+   including ones created in earlier phases. Safe to run on every load. */
+function migrateAssignmentSchema(){
+  const assignments = load(SK.assignments, []);
+  let changed = false;
+  const migrated = assignments.map(a=>{
+    const withDefaults = { attachedResourceIds:[], ...a };
+    if(Object.keys(withDefaults).length !== Object.keys(a).length) changed = true;
+    return withDefaults;
+  });
+  if(changed) save(SK.assignments, migrated);
+}
+
+/* Backfills reference library records saved before Phase 8's richer resource
+   model (bibliographic fields, CBSE curriculum alignment, verification
+   status, saved/role flags, link-check state). Renames the old `link` field
+   to `sourceUrl`. Never invents bibliographic facts for existing records —
+   anything not previously captured is simply left blank for the teacher to
+   fill in, and syllabus alignment defaults to Unverified rather than being
+   guessed. Safe to run on every load. */
+function migrateLibrarySchema(){
+  const items = load(SK.library, []);
+  let changed = false;
+  const nowIso = new Date().toISOString();
+  const migrated = items.map(it=>{
+    const hadLink = it.link !== undefined;
+    const withDefaults = {
+      publisher:'', edition:'', publicationYear:'', isbn:'',
+      chapter:'', topic:'', academicYear:'',
+      description:'', teacherNotes:'',
+      resourceType:'Textbook',
+      verificationStatus:'Unverified',
+      referenceRole:'', saved:false,
+      source:'manual', linkStatus:'unchecked', linkCheckedAt:null,
+      language:'', createdAt:nowIso, updatedAt:nowIso,
+      ...it,
+      sourceUrl: it.sourceUrl!=null ? it.sourceUrl : (it.link||''),
+    };
+    delete withDefaults.link;
+    if(hadLink || Object.keys(withDefaults).length !== Object.keys(it).length) changed = true;
+    return withDefaults;
+  });
+  if(changed) save(SK.library, migrated);
 }
 
 /* Backfills submissions saved before Phase 4 (board/class/subject/lectureId,
@@ -1330,10 +1384,12 @@ function renderLectureList(){
   if(!lectures.length){ list.innerHTML = emptyState('lectures','No lectures match your filters.'); return; }
 
   const canEdit = isTeacherOrAdmin();
+  const libraryItems = load(SK.library, []);
   list.innerHTML = lectures.map(l=>{
     const vid = youtubeId(l.url);
     const expanded = State.expandedLectureIds.has(l.id);
     const objectives = (l.objectives||'').split('\n').map(s=>s.trim()).filter(Boolean);
+    const linkedResources = (l.attachedResourceIds||[]).map(rid=>libraryItems.find(r=>r.id===rid)).filter(Boolean);
     return `<div class="card lecture-card" style="flex-direction:column;">
       <div style="display:flex;gap:12px;">
         <div class="lecture-thumb">${vid?`<img src="https://img.youtube.com/vi/${vid}/hqdefault.jpg" alt="" onerror="this.style.display='none'">`:''}<div class="play-dot">${ico('lectures')}</div></div>
@@ -1366,6 +1422,7 @@ function renderLectureList(){
           ${l.segments.map(s=>`<li><a href="${escapeHtml(buildYoutubeLink(l.url, s.seconds))}" target="_blank" rel="noopener">${formatSecondsAsTime(s.seconds)}</a> — ${escapeHtml(s.label)}</li>`).join('')}
         </ul></div>`:'<p class="hint" style="margin-top:10px;">No timestamped segments added — the AI Doubt Solver will link to the start of the video for this lecture.</p>'}
         <div class="hint" style="margin-top:6px;">Transcript: ${l.transcript?'available':'not added yet — the Doubt Solver uses objectives, notes and description instead.'}</div>
+        <div style="margin-top:10px;"><b style="font-size:12px;">Linked References</b>${linkedResources.length?`<ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-600);">${linkedResources.map(r=>`<li>${escapeHtml(r.title)}${r.sourceUrl?` — <a href="${escapeHtml(r.sourceUrl)}" target="_blank" rel="noopener">${ico('link')} View</a>`:''}</li>`).join('')}</ul>`:'<p class="hint" style="margin:4px 0 0;">No reference resources attached yet — attach one from the Reference Library page.</p>'}</div>
       </div>`:''}
     </div>`;
   }).join('');
@@ -1552,12 +1609,16 @@ function renderAssignmentTable(){
   }).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
   if(!assignments.length){ wrap.innerHTML = emptyState('assignments','No assignments match.'); return; }
   const canEdit = isTeacherOrAdmin();
-  wrap.innerHTML = `<table><thead><tr><th>Title</th><th>Board/Class</th><th>Subject</th><th>Linked Lecture</th><th>Due</th><th>Status</th>${canEdit?'<th></th>':''}</tr></thead><tbody>
+  const libraryItems = load(SK.library, []);
+  wrap.innerHTML = `<table><thead><tr><th>Title</th><th>Board/Class</th><th>Subject</th><th>Linked Lecture</th><th>References</th><th>Due</th><th>Status</th>${canEdit?'<th></th>':''}</tr></thead><tbody>
     ${assignments.map(a=>{
       const lec = lectures.find(l=>l.id===a.lectureId);
+      const linkedResources = (a.attachedResourceIds||[]).map(rid=>libraryItems.find(r=>r.id===rid)).filter(Boolean);
       return `<tr>
         <td>${escapeHtml(a.title)}</td><td>${boardLabel(a.board)} · Class ${a.class}</td><td>${escapeHtml(a.subject)}</td>
-        <td>${lec?escapeHtml(lec.title):'—'}</td><td>${fmtDate(a.dueDate)}</td>
+        <td>${lec?escapeHtml(lec.title):'—'}</td>
+        <td>${linkedResources.length?linkedResources.map(r=>`<span class="meta-chip" title="${escapeHtml(r.title)}">${escapeHtml(r.title.length>18?r.title.slice(0,18)+'…':r.title)}</span>`).join(' '):'—'}</td>
+        <td>${fmtDate(a.dueDate)}</td>
         <td><span class="pill ${a.status==='Overdue'?'pill-overdue':'pill-open'}">${a.status}</span></td>
         ${canEdit?`<td class="row-actions">
           <button class="btn btn-icon btn-ghost" data-action="asg-edit" data-id="${a.id}" title="Edit assignment" aria-label="Edit assignment">${ico('edit')}</button>
@@ -3636,107 +3697,518 @@ PAGE_INIT.doubt = function(){
 };
 
 /* ========================================================================
-   REFERENCE LIBRARY
+   REFERENCE LIBRARY (Phase 8)
+   Scoped to CBSE only for anything newly added here (see RESOURCE_TYPES /
+   the class-subject pickers below) — pre-existing records from earlier
+   phases may still carry a different board and are left untouched.
+   Nothing here ever invents a book's bibliographic details, claims to have
+   read a book it only has metadata for, or fabricates a link-check result.
 ======================================================================== */
+const LibraryState = { selected:new Set(), discover:{type:'Video Lecture', class:'5', language:'English'} };
+
+function resourceTypeOptions(selected){
+  return RESOURCE_TYPES.map(t=>`<option value="${t}" ${t===selected?'selected':''}>${t}</option>`).join('');
+}
+function verificationChip(status){
+  return `<span class="pill ${status==='Verified'?'pill-evaluated':'pill-pending'}">${escapeHtml(status||'Unverified')}</span>`;
+}
+function roleChip(role){
+  if(role==='Primary') return '<span class="pill pill-open">Primary</span>';
+  if(role==='Supplementary') return '<span class="pill pill-neutral">Supplementary</span>';
+  return '<span class="pill pill-neutral">Unassigned</span>';
+}
+function linkStatusLabel(it){
+  if(!it.sourceUrl) return '';
+  const map = {
+    unchecked:'Not checked yet',
+    reachable:'Browser got a response — it cannot confirm the page content itself (cross-origin restriction)',
+    unreachable:'Could not be reached from your browser just now',
+  };
+  const when = it.linkCheckedAt ? ` (checked ${fmtDate(it.linkCheckedAt)})` : '';
+  return (map[it.linkStatus]||map.unchecked) + when;
+}
+
 VIEWS.library = function(){
   const canEdit = isTeacherOrAdmin();
   return `
     <div class="section-title">Reference Library</div>
-    <div class="section-sub">${canEdit?'Add reference books and compare resources across boards.':'Browse reference books for your subjects.'}</div>
+    <div class="section-sub">${canEdit?'Organize, compare and reuse reference resources for CBSE Classes 1–10.':'Browse reference resources for your subjects.'}</div>
+    <div class="info-banner">${ico('shield')}<div>All data here is stored only in this browser's localStorage — it is not shared between devices or teachers, and is lost if browser storage is cleared. New resources are scoped to CBSE only; records from earlier demo phases for other boards remain visible but unchanged. "Verified" means <b>you</b> confirmed the syllabus alignment yourself — this app never checks an official syllabus or reads a book's actual content on its own.</div></div>
 
     ${canEdit?`
-    <div class="card" style="margin-bottom:20px;">
-      <div class="card-head"><h3>Add Reference Book</h3></div>
+    <div class="card" style="margin:20px 0;">
+      <div class="card-head"><h3 id="lib-form-title">Add Reference Resource</h3></div>
+      <p class="hint" style="margin-bottom:10px;">Leave anything you don't actually know blank — this app never guesses a publisher, edition, ISBN or syllabus mapping for you.</p>
       <form id="library-form">
-        <div class="field"><label>Title</label><input type="text" name="title" required></div>
+        <input type="hidden" name="id">
         <div class="field-row">
-          <div class="field"><label>Author / Publisher</label><input type="text" name="author" required></div>
-          <div class="field"><label>Board</label><select name="board" required>${boardOptions('karnataka')}</select></div>
-          <div class="field"><label>Class</label><select name="class" required>${classOptions(5)}</select></div>
+          <div class="field"><label>Title</label><input type="text" name="title" required placeholder="e.g. NCERT Mathematics — Class 7"></div>
+          <div class="field"><label>Resource Type</label><select name="resourceType" required>${resourceTypeOptions('Textbook')}</select></div>
         </div>
         <div class="field-row">
+          <div class="field"><label>Author <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" name="author"></div>
+          <div class="field"><label>Publisher <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" name="publisher"></div>
+          <div class="field"><label>Edition <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" name="edition"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Publication Year <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" name="publicationYear" placeholder="e.g. 2023"></div>
+          <div class="field"><label>ISBN <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" name="isbn" placeholder="e.g. 978-81-xxxx-xxx-x"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Academic Year</label><select name="academicYear">${yearOptions()}</select></div>
+          <div class="field"><label>Language <span class="hint" style="font-weight:400;">(optional)</span></label><select name="language"><option value="">Not specified</option>${languageOptions('')}</select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Class <span class="hint" style="font-weight:400;">(CBSE)</span></label><select name="class" required>${classOptions(5)}</select></div>
           <div class="field"><label>Subject</label><select name="subject" required></select></div>
-          <div class="field"><label>Reference Link</label><input type="url" name="link" placeholder="https://..."></div>
         </div>
-        <button type="submit" class="btn btn-primary">${ico('plus')} Add Book</button>
+        <div class="field-row">
+          <div class="field"><label>Chapter <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" name="chapter" placeholder="e.g. Chapter 4: Fractions" list="lib-chapter-suggestions"><datalist id="lib-chapter-suggestions"></datalist></div>
+          <div class="field"><label>Topic <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" name="topic" placeholder="e.g. Adding like fractions" list="lib-topic-suggestions"><datalist id="lib-topic-suggestions"></datalist></div>
+        </div>
+        <div class="field"><label>Source URL <span class="hint" style="font-weight:400;">(optional)</span></label><input type="url" name="sourceUrl" placeholder="https://..."></div>
+        <div class="field"><label>Description <span class="hint" style="font-weight:400;">(optional)</span></label><textarea name="description" placeholder="What this resource covers..."></textarea></div>
+        <div class="field"><label>Teacher Notes <span class="hint" style="font-weight:400;">(optional — your own assessment of depth, clarity, difficulty, classroom or exam usefulness; this app cannot judge these on its own)</span></label><textarea name="teacherNotes" placeholder="e.g. Clear worked examples, good for exam practice but light on diagrams."></textarea></div>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button type="submit" class="btn btn-primary">${ico('plus')} Save Resource</button>
+          <button type="button" class="btn" id="lib-cancel-edit" style="display:none;">Cancel</button>
+        </div>
       </form>
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Discover &amp; Save a Resource <span class="demo-label">AI Resource Finder</span></h3></div>
+      <p class="hint" style="margin-bottom:10px;">Opens a genuine search on YouTube or Google for the class/subject/chapter/topic you choose — exactly like the "Find on YouTube" tool on the Lectures page. This never fabricates a resource; once you find something worth keeping, paste its real title and link below to save it here.</p>
+      <div class="field-row">
+        <div class="field"><label>Resource Type</label><select id="disc-type">${resourceTypeOptions(LibraryState.discover.type)}</select></div>
+        <div class="field"><label>Class</label><select id="disc-class">${classOptions(LibraryState.discover.class)}</select></div>
+        <div class="field"><label>Subject</label><select id="disc-subject"></select></div>
+        <div class="field"><label>Language</label><select id="disc-language">${languageOptions(LibraryState.discover.language)}</select></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Chapter <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" id="disc-chapter" list="lib-chapter-suggestions"></div>
+        <div class="field"><label>Topic <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" id="disc-topic" list="lib-topic-suggestions"></div>
+      </div>
+      <button type="button" class="btn" id="disc-search-btn">${ico('search')} Search</button>
+
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+        <div style="font-weight:650;font-size:13px;margin-bottom:8px;">Found something? Save it here</div>
+        <form id="discover-save-form">
+          <div class="field-row">
+            <div class="field"><label>Title</label><input type="text" name="title" required placeholder="Exact title of what you found"></div>
+            <div class="field"><label>Source URL</label><input type="url" name="sourceUrl" required placeholder="https://..."></div>
+          </div>
+          <div class="field"><label>Author / Channel <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" name="author"></div>
+          <button type="submit" class="btn btn-primary">${ico('plus')} Save to Library</button>
+        </form>
+      </div>
     </div>`:''}
 
     <div class="card" style="margin-bottom:20px;">
       <div class="toolbar">
-        <div class="search-box">${ico('search')}<input type="text" id="lib-search" placeholder="Search title or author..."></div>
-        <select id="lib-filter-board"><option value="">All boards</option>${boardOptions('')}</select>
+        <div class="search-box">${ico('search')}<input type="text" id="lib-search" placeholder="Search title, author, publisher or ISBN..."></div>
+        <select id="lib-filter-class"><option value="">All classes</option>${classOptions('')}</select>
+        <select id="lib-filter-subject"><option value="">All subjects</option></select>
+        <select id="lib-filter-chapter"><option value="">All chapters</option></select>
+        <select id="lib-filter-topic"><option value="">All topics</option></select>
+        <select id="lib-filter-type"><option value="">All types</option>${resourceTypeOptions('')}</select>
+        <select id="lib-filter-language"><option value="">All languages</option>${languageOptions('')}</select>
+        <select id="lib-filter-verification"><option value="">All verification</option><option value="Verified">Verified</option><option value="Unverified">Unverified</option></select>
+        <select id="lib-filter-role"><option value="">All roles</option><option value="Primary">Primary</option><option value="Supplementary">Supplementary</option><option value="none">Unassigned</option></select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap;"><input type="checkbox" id="lib-filter-saved"> Saved only</label>
       </div>
+      ${canEdit?`<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0;flex-wrap:wrap;gap:8px;">
+        <div class="hint" id="lib-select-count">0 selected</div>
+        <button type="button" class="btn btn-sm" id="lib-compare-btn" disabled>${ico('compare')} Compare Selected</button>
+      </div>`:''}
       <div class="table-wrap" id="lib-table-wrap"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-head"><h3>Illustrative Comparison <span class="demo-label">Sample only</span></h3></div>
-      <p class="hint" style="margin-bottom:10px;">Example of how the same subject/class can be compared across boards. For demonstration only — not a verified syllabus comparison.</p>
-      <div class="table-wrap">
-        <table><thead><tr><th>Subject</th><th>Class</th><th>Karnataka State Board</th><th>CBSE</th></tr></thead>
-        <tbody>
-          <tr><td>Mathematics</td><td>7</td><td>KTBS Mathematics Part 1 &amp; 2</td><td>NCERT Mathematics</td></tr>
-          <tr><td>Science</td><td>8</td><td>KTBS Science</td><td>NCERT Science</td></tr>
-          <tr><td>Social Science</td><td>9</td><td>KTBS Social Science</td><td>NCERT Social Science</td></tr>
-        </tbody></table>
-      </div>
     </div>`;
 };
 
 function librarySubjectRefresh(form){
-  const board = form.board.value, cls = form.class.value;
-  form.subject.innerHTML = subjectOptions(board, cls, form.subject.value);
+  const cls = form.class.value;
+  form.subject.innerHTML = subjectOptions('cbse', cls, form.subject.value);
+  refreshLibrarySuggestionLists(cls, form.subject.value);
 }
+/* Suggests chapter/topic values already defined in the CBSE Curriculum, so
+   library entries stay consistent with it — same pattern as the Lectures
+   page's suggestion lists. */
+function refreshLibrarySuggestionLists(cls, subject){
+  const entries = load(SK.curriculum, []).filter(e=>e.board==='cbse' && String(e.class)===String(cls) && (!subject || e.subject===subject));
+  const chapters = uniqueSorted(entries.map(e=>e.chapter));
+  const topics = uniqueSorted(entries.map(e=>e.topic));
+  const chapterList = $('#lib-chapter-suggestions');
+  if(chapterList) chapterList.innerHTML = chapters.map(c=>`<option value="${escapeHtml(c)}">`).join('');
+  const topicList = $('#lib-topic-suggestions');
+  if(topicList) topicList.innerHTML = topics.map(t=>`<option value="${escapeHtml(t)}">`).join('');
+}
+
+function normalizeResourceUrl(url){
+  return String(url||'').trim().toLowerCase().replace(/\/+$/,'');
+}
+function findDuplicateLibraryItem(url, excludeId){
+  const norm = normalizeResourceUrl(url);
+  if(!norm) return null;
+  return load(SK.library, []).find(x=>x.id!==excludeId && normalizeResourceUrl(x.sourceUrl)===norm) || null;
+}
+
+/* Builds a genuine external search URL (YouTube for video, Google otherwise)
+   from curriculum context — same technique as buildYoutubeLink on the
+   Lectures page. Never fabricates a result; the teacher still has to find
+   and confirm the actual resource themselves. */
+function buildResourceSearchLink(type, ctx){
+  const parts = [ctx.subject, ctx.chapter, ctx.topic, ctx.class?('Class '+ctx.class):'', 'CBSE'].filter(Boolean).join(' ');
+  if(type==='Video Lecture'){
+    const langPart = (ctx.language && ctx.language!=='English') ? (ctx.language+' ') : '';
+    return 'https://www.youtube.com/results?search_query=' + encodeURIComponent(parts+' '+langPart+'lecture');
+  }
+  const typeWord = {Worksheet:'worksheet pdf', 'Question Bank':'question bank practice', Article:'article', Textbook:'textbook', Workbook:'workbook', Other:'resource'}[type] || 'resource';
+  return 'https://www.google.com/search?q=' + encodeURIComponent(parts+' '+typeWord);
+}
+
+/* Best-effort reachability check only — browsers cannot read the status or
+   content of a cross-origin response (opaque "no-cors" response), so this
+   can only ever report "reachable" or "could not be reached," never a real
+   HTTP status or page-content confirmation. Always labelled honestly in the
+   UI rather than presented as a verified "working link." */
+async function checkLibraryLink(id){
+  const items = load(SK.library, []);
+  const it = items.find(x=>x.id===id); if(!it || !it.sourceUrl) return;
+  const btn = document.querySelector(`[data-action="lib-check-link"][data-id="${id}"]`);
+  if(btn){ btn.disabled = true; btn.textContent = 'Checking...'; }
+  let status;
+  try{
+    const opts = {mode:'no-cors'};
+    if(typeof AbortSignal!=='undefined' && AbortSignal.timeout) opts.signal = AbortSignal.timeout(8000);
+    await fetch(it.sourceUrl, opts);
+    status = 'reachable';
+  }catch(e){
+    status = 'unreachable';
+  }
+  const all = load(SK.library, []);
+  save(SK.library, all.map(x=>x.id===id?{...x, linkStatus:status, linkCheckedAt:new Date().toISOString()}:x));
+  toast(status==='reachable' ? 'Link responded — browsers cannot confirm the page content itself.' : 'Could not reach this link from your browser just now.', status==='reachable'?'success':'error');
+  renderLibraryTable();
+}
+
+/* Rule-based, explainable comparison over ONLY the fields the teacher
+   actually entered. It never claims to have read a book's content — the
+   "depth/clarity/difficulty" criterion is literally the teacher's own notes
+   verbatim, and a primary-reference recommendation is only made when
+   exactly one compared item is both Verified and chapter/topic-aligned to
+   the comparison's scope. */
+function compareLibraryItems(items){
+  const freq = {};
+  items.forEach(it=>{ const k = it.class+'|'+it.subject; freq[k]=(freq[k]||0)+1; });
+  const scopeKey = Object.keys(freq).sort((a,b)=>freq[b]-freq[a])[0];
+  const [scopeClass, scopeSubject] = scopeKey.split('|');
+  const rows = items.map(it=>{
+    let relevance;
+    if(String(it.class)!==String(scopeClass) || it.subject!==scopeSubject){
+      relevance = 'Different class/subject than the other selected resources — not directly comparable.';
+    } else if(it.chapter && it.topic){
+      const shared = items.filter(x=>x!==it && x.chapter===it.chapter && String(x.class)===String(scopeClass) && x.subject===scopeSubject).length;
+      relevance = shared ? `Shares chapter "${it.chapter}" with ${shared} other selected resource(s).` : `Chapter "${it.chapter}" / topic "${it.topic}" specified, but no other selected resource shares it.`;
+    } else {
+      relevance = 'Chapter/topic not specified for this resource — add it to improve comparison accuracy.';
+    }
+    return { item:it, relevance };
+  });
+  const candidates = rows.filter(r=>r.item.verificationStatus==='Verified' && String(r.item.class)===String(scopeClass) && r.item.subject===scopeSubject && r.item.chapter && r.item.topic);
+  let note;
+  if(candidates.length===1){
+    note = `"${candidates[0].item.title}" is the only resource in this comparison that is both Verified and chapter/topic-aligned to Class ${scopeClass} ${scopeSubject} — it's the strongest candidate for a primary reference here. Treat the rest as supplementary unless you know otherwise.`;
+  } else if(candidates.length>1){
+    note = "More than one Verified, chapter-aligned resource is in this comparison — there isn't enough distinguishing evidence to pick one automatically. Choose a primary reference yourself using the Primary/Supp. buttons in the table.";
+  } else {
+    note = "No resource in this comparison is both Verified and chapter/topic-aligned to this scope — not enough evidence to recommend a primary reference automatically. Verify and align a resource's chapter/topic, or choose one manually.";
+  }
+  return {scopeClass, scopeSubject, rows, note};
+}
+
+function openLibraryCompareModal(){
+  const all = load(SK.library, []);
+  const items = all.filter(x=>LibraryState.selected.has(x.id));
+  if(items.length<2 || items.length>4){ toast('Select 2 to 4 resources to compare.','error'); return; }
+  const result = compareLibraryItems(items);
+  const rowDefs = [
+    {label:'Author / Publisher', get:r=>escapeHtml([r.item.author,r.item.publisher].filter(Boolean).join(' · ')||'—')},
+    {label:'Class · Subject', get:r=>`Class ${escapeHtml(String(r.item.class))} · ${escapeHtml(r.item.subject)}`},
+    {label:'Chapter · Topic', get:r=>escapeHtml([r.item.chapter,r.item.topic].filter(Boolean).join(' · ')||'Not specified')},
+    {label:'Resource Type', get:r=>escapeHtml(r.item.resourceType)},
+    {label:'Verification', get:r=>verificationChip(r.item.verificationStatus)},
+    {label:'Relevance to this comparison', get:r=>escapeHtml(r.relevance)},
+    {label:'Current Role', get:r=>roleChip(r.item.referenceRole)},
+    {label:"Teacher's Notes (depth / clarity / difficulty / classroom &amp; exam usefulness)", get:r=>r.item.teacherNotes?escapeHtml(r.item.teacherNotes):'<span class="hint">No notes added — this app only has this resource\'s metadata, not its actual content, so it cannot judge depth, clarity or difficulty on its own.</span>'},
+  ];
+  const html = `
+    <div class="card-head"><h3>Compare Resources</h3><button class="btn btn-icon btn-ghost" data-action="modal-close" aria-label="Close">${ico('close')}</button></div>
+    <p class="hint" style="margin:0 0 12px;">Comparison scope: Class ${escapeHtml(result.scopeClass)} · ${escapeHtml(result.scopeSubject)} (the most common class/subject among the resources selected). This is a demo heuristic comparison based only on the metadata and notes entered here — it has not read the actual content of any of these resources.</p>
+    <div class="table-wrap"><table><thead><tr><th></th>${result.rows.map(r=>`<th>${escapeHtml(r.item.title)}</th>`).join('')}</tr></thead>
+    <tbody>${rowDefs.map(rd=>`<tr><td><b>${rd.label}</b></td>${result.rows.map(r=>`<td>${rd.get(r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="info-banner" style="margin-top:14px;">${ico('shield')}<div>${escapeHtml(result.note)}</div></div>`;
+  openModalHtml(html, true);
+}
+
+function updateLibrarySelectionUI(){
+  const n = LibraryState.selected.size;
+  const countEl = $('#lib-select-count');
+  if(countEl) countEl.textContent = n + ' selected' + (n>4?' (compare up to 4 at a time)':'');
+  const btn = $('#lib-compare-btn');
+  if(btn) btn.disabled = n<2 || n>4;
+}
+
+/* Attaches a Reference Library resource to an existing Lecture or
+   Assignment — reuses those records' own data (just an attachedResourceIds
+   array added by migrateLectureSchema/migrateAssignmentSchema) rather than
+   creating a separate "lesson plan" entity or duplicating resource data. */
+function openAttachResourceModal(resourceId){
+  const resource = load(SK.library, []).find(x=>x.id===resourceId); if(!resource) return;
+  const lectures = load(SK.lectures, []);
+  const assignments = load(SK.assignments, []);
+  const html = `
+    <div class="card-head"><h3>Attach "${escapeHtml(resource.title)}"</h3><button class="btn btn-icon btn-ghost" data-action="modal-close" aria-label="Close">${ico('close')}</button></div>
+    <div class="field"><label>Attach to</label><select id="attach-target-type"><option value="lecture">A Lecture</option><option value="assignment">An Assignment / Question Paper</option></select></div>
+    <div class="field"><label>Choose</label><select id="attach-target-id"></select></div>
+    <div class="modal-actions"><button class="btn" data-action="modal-cancel">Cancel</button><button class="btn btn-primary" id="attach-confirm-btn">Attach</button></div>`;
+  openModalHtml(html);
+  const typeSel = $('#attach-target-type'), idSel = $('#attach-target-id');
+  function refreshTargets(){
+    const list = typeSel.value==='lecture' ? lectures : assignments;
+    idSel.innerHTML = list.length ? list.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}${(x.attachedResourceIds||[]).includes(resourceId)?' (already attached)':''}</option>`).join('') : '<option value="">No records yet</option>';
+  }
+  refreshTargets();
+  typeSel.addEventListener('change', refreshTargets);
+  $('#attach-confirm-btn').addEventListener('click', function(){
+    const targetId = idSel.value; if(!targetId) return;
+    const key = typeSel.value==='lecture' ? SK.lectures : SK.assignments;
+    const list = load(key, []);
+    save(key, list.map(x=>{
+      if(x.id!==targetId) return x;
+      const ids = new Set(x.attachedResourceIds||[]); ids.add(resourceId);
+      return {...x, attachedResourceIds:Array.from(ids)};
+    }));
+    toast('Resource attached.','success');
+    closeModal();
+  });
+}
+
+function renderLibraryFilters(){
+  const items = load(SK.library, []);
+  const fc = $('#lib-filter-class')?.value||'';
+  let pool = items.filter(i=> !fc || String(i.class)===fc);
+
+  const subjSel = $('#lib-filter-subject');
+  const curSubj = subjSel?subjSel.value:'';
+  const subjects = uniqueSorted(pool.map(i=>i.subject));
+  const fs = subjects.includes(curSubj)?curSubj:'';
+  if(subjSel) subjSel.innerHTML = '<option value="">All subjects</option>'+subjects.map(s=>`<option value="${escapeHtml(s)}" ${s===fs?'selected':''}>${escapeHtml(s)}</option>`).join('');
+  pool = pool.filter(i=> !fs || i.subject===fs);
+
+  const chapSel = $('#lib-filter-chapter');
+  const curChap = chapSel?chapSel.value:'';
+  const chapters = uniqueSorted(pool.map(i=>i.chapter));
+  const fch = chapters.includes(curChap)?curChap:'';
+  if(chapSel) chapSel.innerHTML = '<option value="">All chapters</option>'+chapters.map(c=>`<option value="${escapeHtml(c)}" ${c===fch?'selected':''}>${escapeHtml(c)}</option>`).join('');
+  pool = pool.filter(i=> !fch || i.chapter===fch);
+
+  const topicSel = $('#lib-filter-topic');
+  const curTopic = topicSel?topicSel.value:'';
+  const topics = uniqueSorted(pool.map(i=>i.topic));
+  const ft = topics.includes(curTopic)?curTopic:'';
+  if(topicSel) topicSel.innerHTML = '<option value="">All topics</option>'+topics.map(t=>`<option value="${escapeHtml(t)}" ${t===ft?'selected':''}>${escapeHtml(t)}</option>`).join('');
+}
+
 function renderLibraryTable(){
   const wrap = $('#lib-table-wrap'); if(!wrap) return;
   const q = ($('#lib-search')?.value||'').toLowerCase();
-  const fb = $('#lib-filter-board')?.value||'';
-  let items = load(SK.library, []);
-  items = items.filter(i=>{
-    if(fb && i.board!==fb) return false;
-    if(q && !(i.title+i.author).toLowerCase().includes(q)) return false;
+  const fc = $('#lib-filter-class')?.value||'';
+  const fs = $('#lib-filter-subject')?.value||'';
+  const fch = $('#lib-filter-chapter')?.value||'';
+  const ft = $('#lib-filter-topic')?.value||'';
+  const ftype = $('#lib-filter-type')?.value||'';
+  const flang = $('#lib-filter-language')?.value||'';
+  const fver = $('#lib-filter-verification')?.value||'';
+  const frole = $('#lib-filter-role')?.value||'';
+  const savedOnly = $('#lib-filter-saved')?.checked||false;
+  const allItems = load(SK.library, []);
+  let items = allItems.filter(i=>{
+    if(fc && String(i.class)!==fc) return false;
+    if(fs && i.subject!==fs) return false;
+    if(fch && i.chapter!==fch) return false;
+    if(ft && i.topic!==ft) return false;
+    if(ftype && i.resourceType!==ftype) return false;
+    if(flang && (i.language||'')!==flang) return false;
+    if(fver && i.verificationStatus!==fver) return false;
+    if(frole==='none' && i.referenceRole){ return false; }
+    else if(frole && frole!=='none' && i.referenceRole!==frole) return false;
+    if(savedOnly && !i.saved) return false;
+    if(q && !(i.title+' '+(i.author||'')+' '+(i.publisher||'')+' '+(i.isbn||'')).toLowerCase().includes(q)) return false;
     return true;
-  });
-  if(!items.length){ wrap.innerHTML = emptyState('library','No reference books match.'); return; }
+  }).sort((a,b)=>new Date(b.updatedAt||0)-new Date(a.updatedAt||0));
+
+  if(!allItems.length){ wrap.innerHTML = emptyState('library','No reference resources yet.'); updateLibrarySelectionUI(); return; }
+  if(!items.length){ wrap.innerHTML = emptyState('library','No reference resources match your filters.'); updateLibrarySelectionUI(); return; }
+
   const canEdit = isTeacherOrAdmin();
-  wrap.innerHTML = `<table><thead><tr><th>Title</th><th>Author</th><th>Board/Class</th><th>Subject</th><th>Link</th>${canEdit?'<th></th>':''}</tr></thead><tbody>
+  wrap.innerHTML = `<table><thead><tr>
+    ${canEdit?'<th></th>':''}<th>Title / Type</th><th>Author / Publisher</th><th>Class · Subject</th><th>Chapter · Topic</th><th>Role</th><th>Saved</th><th>Source</th><th>Notes</th>${canEdit?'<th></th>':''}
+  </tr></thead><tbody>
     ${items.map(i=>`<tr>
-      <td>${escapeHtml(i.title)}</td><td>${escapeHtml(i.author)}</td><td>${boardLabel(i.board)} · Class ${i.class}</td>
-      <td>${escapeHtml(i.subject)}</td><td>${i.link?`<a href="${escapeHtml(i.link)}" target="_blank" rel="noopener">${ico('link')} View</a>`:'—'}</td>
-      ${canEdit?`<td class="row-actions"><button class="btn btn-icon btn-ghost" data-action="lib-delete" data-id="${i.id}" title="Delete reference" aria-label="Delete reference">${ico('trash')}</button></td>`:''}
-    </tr>`).join('')}</tbody></table>`;
+      ${canEdit?`<td><input type="checkbox" data-action="lib-select" data-id="${i.id}" ${LibraryState.selected.has(i.id)?'checked':''} aria-label="Select for comparison"></td>`:''}
+      <td><div style="font-weight:600;">${escapeHtml(i.title)}</div><span class="meta-chip">${escapeHtml(i.resourceType||'Other')}</span>${i.source==='resource-finder'?' <span class="meta-chip">Resource Finder</span>':''}</td>
+      <td>${escapeHtml([i.author,i.publisher].filter(Boolean).join(' · ')||'—')}</td>
+      <td>Class ${escapeHtml(String(i.class))} · ${escapeHtml(i.subject)}</td>
+      <td>${escapeHtml([i.chapter,i.topic].filter(Boolean).join(' · ')||'Not specified')}<div style="margin-top:4px;">${verificationChip(i.verificationStatus)} ${canEdit?`<button type="button" class="btn btn-sm btn-ghost" data-action="lib-toggle-verify" data-id="${i.id}">Mark ${i.verificationStatus==='Verified'?'Unverified':'Verified'}</button>`:''}</div></td>
+      <td>${roleChip(i.referenceRole)}${canEdit?`<div style="margin-top:4px;display:flex;gap:4px;"><button type="button" class="btn btn-sm ${i.referenceRole==='Primary'?'btn-primary':'btn-ghost'}" data-action="lib-set-role" data-role="Primary" data-id="${i.id}">Primary</button><button type="button" class="btn btn-sm ${i.referenceRole==='Supplementary'?'btn-primary':'btn-ghost'}" data-action="lib-set-role" data-role="Supplementary" data-id="${i.id}">Supp.</button></div>`:''}</td>
+      <td>${canEdit?`<button type="button" class="btn btn-icon btn-ghost" data-action="lib-toggle-saved" data-id="${i.id}" title="${i.saved?'Remove from saved':'Save'}" aria-label="Toggle saved">${ico(i.saved?'starFilled':'star')}</button>`:(i.saved?ico('starFilled'):'—')}</td>
+      <td>${i.sourceUrl?`<a href="${escapeHtml(i.sourceUrl)}" target="_blank" rel="noopener">${ico('link')} View</a>`:'—'}
+        ${i.sourceUrl&&canEdit?`<div style="margin-top:4px;"><button type="button" class="btn btn-sm btn-ghost" data-action="lib-check-link" data-id="${i.id}">Check Link</button></div><div class="hint" style="margin-top:2px;max-width:160px;">${escapeHtml(linkStatusLabel(i))}</div>`:''}</td>
+      <td style="max-width:180px;">${i.teacherNotes?`<span title="${escapeHtml(i.teacherNotes)}">${escapeHtml(i.teacherNotes.length>60?i.teacherNotes.slice(0,60)+'…':i.teacherNotes)}</span>`:'—'}</td>
+      ${canEdit?`<td class="row-actions">
+        <button class="btn btn-icon btn-ghost" data-action="lib-attach" data-id="${i.id}" title="Attach to a lecture or assignment" aria-label="Attach">${ico('link')}</button>
+        <button class="btn btn-icon btn-ghost" data-action="lib-edit" data-id="${i.id}" title="Edit resource" aria-label="Edit resource">${ico('edit')}</button>
+        <button class="btn btn-icon btn-ghost" data-action="lib-delete" data-id="${i.id}" title="Delete resource" aria-label="Delete resource">${ico('trash')}</button>
+      </td>`:''}
+    </tr>`).join('')}
+  </tbody></table>`;
+  updateLibrarySelectionUI();
 }
+
 PAGE_INIT.library = function(){
-  ['lib-search','lib-filter-board'].forEach(id=>{
-    $('#'+id).addEventListener('input', debounce(renderLibraryTable,150));
-    $('#'+id).addEventListener('change', renderLibraryTable);
-  });
-  $('#lib-table-wrap').addEventListener('click', function(e){
-    const btn = e.target.closest('[data-action="lib-delete"]'); if(!btn) return;
-    confirmAction('Delete reference?','This demo reference book will be removed.', ()=>{
-      save(SK.library, load(SK.library,[]).filter(x=>x.id!==btn.dataset.id));
-      toast('Reference removed.','success');
-      renderLibraryTable();
-    }, true);
-  });
+  LibraryState.selected = new Set();
+  renderLibraryFilters();
   renderLibraryTable();
 
+  ['lib-search','lib-filter-class','lib-filter-subject','lib-filter-chapter','lib-filter-topic','lib-filter-type','lib-filter-language','lib-filter-verification','lib-filter-role','lib-filter-saved'].forEach(id=>{
+    const el = $('#'+id); if(!el) return;
+    el.addEventListener('input', debounce(renderLibraryTable,150));
+    el.addEventListener('change', function(){
+      if(id==='lib-filter-class' || id==='lib-filter-subject') renderLibraryFilters();
+      renderLibraryTable();
+    });
+  });
+
+  if(!isTeacherOrAdmin()) return;
+
+  $('#lib-table-wrap').addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action]'); if(!btn) return;
+    const id = btn.dataset.id;
+    const items = load(SK.library, []);
+    const it = items.find(x=>x.id===id);
+    if(btn.dataset.action==='lib-delete'){
+      confirmAction('Delete reference resource?','This reference resource will be removed from the library. Lectures or assignments it is attached to will no longer show it.', ()=>{
+        save(SK.library, load(SK.library,[]).filter(x=>x.id!==id));
+        toast('Resource removed.','success');
+        renderLibraryTable();
+      }, true);
+    }
+    if(btn.dataset.action==='lib-edit' && it){
+      const form = $('#library-form'); if(!form) return;
+      form.id.value = it.id; form.title.value = it.title||'';
+      form.resourceType.value = it.resourceType||'Textbook';
+      form.author.value = it.author||''; form.publisher.value = it.publisher||'';
+      form.edition.value = it.edition||''; form.publicationYear.value = it.publicationYear||'';
+      form.isbn.value = it.isbn||''; form.academicYear.value = it.academicYear||DEFAULT_ACADEMIC_YEAR;
+      form.language.value = it.language||'';
+      form.class.value = it.class||'5'; librarySubjectRefresh(form);
+      form.subject.value = it.subject||''; refreshLibrarySuggestionLists(form.class.value, form.subject.value);
+      form.chapter.value = it.chapter||''; form.topic.value = it.topic||'';
+      form.sourceUrl.value = it.sourceUrl||''; form.description.value = it.description||'';
+      form.teacherNotes.value = it.teacherNotes||'';
+      $('#lib-form-title').textContent = 'Edit Reference Resource';
+      $('#lib-cancel-edit').style.display = 'inline-flex';
+      form.scrollIntoView({behavior:'smooth'});
+    }
+    if(btn.dataset.action==='lib-toggle-verify' && it){
+      const next = it.verificationStatus==='Verified' ? 'Unverified' : 'Verified';
+      save(SK.library, items.map(x=>x.id===id?{...x, verificationStatus:next, updatedAt:new Date().toISOString()}:x));
+      toast(`Marked ${next}.`,'success');
+      renderLibraryTable();
+    }
+    if(btn.dataset.action==='lib-set-role' && it){
+      const role = btn.dataset.role;
+      const next = it.referenceRole===role ? '' : role;
+      save(SK.library, items.map(x=>x.id===id?{...x, referenceRole:next, updatedAt:new Date().toISOString()}:x));
+      renderLibraryTable();
+    }
+    if(btn.dataset.action==='lib-toggle-saved' && it){
+      save(SK.library, items.map(x=>x.id===id?{...x, saved:!x.saved}:x));
+      renderLibraryTable();
+    }
+    if(btn.dataset.action==='lib-check-link'){ checkLibraryLink(id); }
+    if(btn.dataset.action==='lib-attach'){ openAttachResourceModal(id); }
+  });
+
+  $('#lib-table-wrap').addEventListener('change', function(e){
+    const cb = e.target.closest('[data-action="lib-select"]'); if(!cb) return;
+    if(cb.checked) LibraryState.selected.add(cb.dataset.id); else LibraryState.selected.delete(cb.dataset.id);
+    updateLibrarySelectionUI();
+  });
+
+  $('#lib-compare-btn').addEventListener('click', openLibraryCompareModal);
+
   const form = $('#library-form');
-  if(!form) return;
   librarySubjectRefresh(form);
-  form.board.addEventListener('change', ()=>librarySubjectRefresh(form));
   form.class.addEventListener('change', ()=>librarySubjectRefresh(form));
+  $('#lib-cancel-edit').addEventListener('click', function(){
+    form.reset(); form.id.value=''; librarySubjectRefresh(form);
+    $('#lib-form-title').textContent='Add Reference Resource'; this.style.display='none';
+  });
   form.addEventListener('submit', function(e){
     e.preventDefault();
     const fd = new FormData(form);
     const data = Object.fromEntries(fd.entries());
-    data.id = uid('lib');
+    const dup = findDuplicateLibraryItem(data.sourceUrl, data.id||null);
+    if(dup){ toast(`Already in the library as "${dup.title}" — not saving a duplicate.`,'error'); return; }
     const items = load(SK.library, []);
-    items.push(data);
+    if(data.id){
+      save(SK.library, items.map(x=>x.id===data.id?{...x, ...data, updatedAt:new Date().toISOString()}:x));
+      toast('Resource updated.','success');
+    } else {
+      data.id = uid('lib'); data.source = 'manual'; data.verificationStatus = 'Unverified';
+      data.referenceRole = ''; data.saved = false; data.linkStatus = 'unchecked'; data.linkCheckedAt = null;
+      data.createdAt = new Date().toISOString(); data.updatedAt = data.createdAt;
+      items.push(data);
+      save(SK.library, items);
+      toast('Resource added.','success');
+    }
+    form.reset(); form.id.value=''; librarySubjectRefresh(form);
+    $('#lib-form-title').textContent='Add Reference Resource'; $('#lib-cancel-edit').style.display='none';
+    renderLibraryTable();
+  });
+
+  const discType=$('#disc-type'), discClass=$('#disc-class'), discSubject=$('#disc-subject'), discChapter=$('#disc-chapter'), discTopic=$('#disc-topic'), discLanguage=$('#disc-language');
+  function discoverSubjectRefresh(){
+    discSubject.innerHTML = subjectOptions('cbse', discClass.value, discSubject.value);
+    refreshLibrarySuggestionLists(discClass.value, discSubject.value);
+  }
+  discoverSubjectRefresh();
+  discClass.addEventListener('change', discoverSubjectRefresh);
+  discSubject.addEventListener('change', ()=>refreshLibrarySuggestionLists(discClass.value, discSubject.value));
+  $('#disc-search-btn').addEventListener('click', function(){
+    const url = buildResourceSearchLink(discType.value, {class:discClass.value, subject:discSubject.value, chapter:discChapter.value, topic:discTopic.value, language:discLanguage.value});
+    window.open(url, '_blank', 'noopener');
+  });
+  const discoverForm = $('#discover-save-form');
+  discoverForm.addEventListener('submit', function(e){
+    e.preventDefault();
+    const fd = new FormData(discoverForm);
+    const data = Object.fromEntries(fd.entries());
+    const dup = findDuplicateLibraryItem(data.sourceUrl, null);
+    if(dup){ toast(`Already saved as "${dup.title}".`,'error'); return; }
+    const items = load(SK.library, []);
+    const now = new Date().toISOString();
+    items.push({
+      id:uid('lib'), title:data.title, author:data.author||'', publisher:'', edition:'', publicationYear:'', isbn:'',
+      class:discClass.value, subject:discSubject.value, chapter:discChapter.value||'', topic:discTopic.value||'',
+      academicYear:DEFAULT_ACADEMIC_YEAR, description:'', teacherNotes:'', resourceType:discType.value,
+      language:discLanguage.value, sourceUrl:data.sourceUrl, verificationStatus:'Unverified', referenceRole:'',
+      saved:false, source:'resource-finder', linkStatus:'unchecked', linkCheckedAt:null, createdAt:now, updatedAt:now,
+    });
     save(SK.library, items);
-    toast('Reference book added.','success');
-    form.reset(); librarySubjectRefresh(form);
+    toast('Saved to Reference Library.','success');
+    discoverForm.reset();
     renderLibraryTable();
   });
 };
@@ -3785,7 +4257,11 @@ VIEWS.settings = function(){
         <li>Image uploads are previewed locally in the browser only and are never stored or transmitted, unless you configure a real evaluation backend above.</li>
         <li>AI evaluation of handwritten submissions (Phase 5) only runs against a backend you configure and deploy yourself; without one, evaluation attempts fail honestly rather than producing fabricated results.</li>
         <li>Per-student performance evidence and AI-suggested feedback are computed from this demo's own submission records; the demo role switch is not a real access-control boundary — a real backend must authorize which students a given teacher may view, <b>and</b> verify a student's own identity before showing them anything (see EVALUATION_BACKEND.md). The "Who are you?" picker on the student side is a demo stand-in for login, not authentication.</li>
-        <li>All data is stored in this browser's localStorage and is not shared between devices.</li>
+        <li>The Reference Library's resource comparison (Phase 8) is a rule-based heuristic over the metadata and notes a teacher enters — it never reads a book's actual content, and depth/clarity/difficulty assessments shown there are literally the teacher's own notes, not an AI judgment.</li>
+        <li>The Reference Library's "Check Link" feature can only report whether a browser request to a URL succeeded or failed — cross-origin restrictions mean it cannot read the page's real HTTP status or confirm the content actually loaded correctly.</li>
+        <li>New Reference Library resources are scoped to CBSE only; records added in earlier demo phases for other boards remain visible but are not reclassified.</li>
+        <li>The AI Resource Finder integration opens genuine YouTube/Google searches built from curriculum fields — it never fabricates a resource; a teacher still has to find, open and confirm the actual resource before saving its real title and link.</li>
+        <li>All data is stored in this browser's localStorage and is not shared between devices or teachers — a real multi-user deployment needs server-side storage with per-teacher accounts and access control, not just a larger browser quota.</li>
       </ul>
     </div>`;
 };
@@ -3837,6 +4313,8 @@ seedData();
 migrateLectureSchema();
 migrateSubmissionSchema();
 migrateStudentFeedbackSchema();
+migrateAssignmentSchema();
+migrateLibrarySchema();
 const savedRole = load(SK.role, null);
 if(savedRole){
   State.role = savedRole;
