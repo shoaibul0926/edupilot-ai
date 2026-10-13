@@ -710,6 +710,21 @@ function migrateSubmissionSchema(){
   if(changed) save(SK.submissions, migrated);
 }
 
+/* Phase 7 expands feedback status from two stages (Provisional/Approved)
+   to four (Draft/Pending Teacher Review/Approved/Published). Remaps any
+   previously saved records onto the new lifecycle without losing them. */
+function migrateStudentFeedbackSchema(){
+  const all = load(SK.studentFeedback, []);
+  let changed = false;
+  const migrated = all.map(fb=>{
+    const merged = {publishedAt:null, publishedBy:null, strengths:[], ...fb};
+    if(merged.status === 'Provisional'){ merged.status = 'Draft'; changed = true; }
+    if(Object.keys(merged).length !== Object.keys(fb).length) changed = true;
+    return merged;
+  });
+  if(changed) save(SK.studentFeedback, migrated);
+}
+
 /* ========================================================================
    STATE
 ======================================================================== */
@@ -2777,9 +2792,19 @@ PAGE_INIT.submissions = function(){
 ======================================================================== */
 function normalizeText(t){ return (t||'').trim().toLowerCase().replace(/\s+/g,' '); }
 
-function computeStudentEvidence(studentName){
-  const allSubmissions = load(SK.submissions, []).filter(s=>s.studentName===studentName).sort((a,b)=>new Date(a.submittedAt)-new Date(b.submittedAt));
+/* filters: optional {subject, chapter} to narrow the evidence set — used by
+   the Student Detail filter bar. Omit for the student's full history. */
+function computeStudentEvidence(studentName, filters){
+  filters = filters || {};
   const assignments = load(SK.assignments, []);
+  let allSubmissions = load(SK.submissions, []).filter(s=>s.studentName===studentName).sort((a,b)=>new Date(a.submittedAt)-new Date(b.submittedAt));
+  if(filters.subject) allSubmissions = allSubmissions.filter(s=>s.subject===filters.subject);
+  if(filters.chapter){
+    allSubmissions = allSubmissions.filter(s=>{
+      const a = assignments.find(x=>x.id===s.assignmentId);
+      return a && a.chapter===filters.chapter;
+    });
+  }
   const evaluated = allSubmissions.filter(s=>s.status==='Evaluated');
   const topicMap = {}, miscMap = {};
 
@@ -2816,7 +2841,34 @@ function computeStudentEvidence(studentName){
 
   const topics = Object.values(topicMap).map(t=>({...t, masteryPercent:t.weight?Math.round(t.sumPct/t.weight):0, evidenceCount:t.weight}));
   const misconceptions = Object.values(miscMap).sort((a,b)=>b.count-a.count);
-  return {allSubmissions, evaluated, topics, misconceptions};
+  const strongTopics = topics.filter(t=>t.evidenceCount>=2 && t.masteryPercent>=80).sort((a,b)=>b.masteryPercent-a.masteryPercent);
+  const weakTopics = topics.filter(t=>t.evidenceCount>=2 && t.masteryPercent<70).sort((a,b)=>a.masteryPercent-b.masteryPercent);
+  return {allSubmissions, evaluated, topics, misconceptions, strongTopics, weakTopics};
+}
+
+/* Per-question breakdown for one submission, when it has Phase 5 AI-graded
+   data against an approved question set. Returns null (not []), honestly,
+   when only a flat manual score exists — never fabricates question rows. */
+function getQuestionWiseResults(submission){
+  const genAssignment = findApprovedQuestionSet(submission.assignmentId);
+  const results = submission.evaluation && submission.evaluation.grading && submission.evaluation.grading.questionResults;
+  if(!genAssignment || !results || !results.length) return null;
+  const teacherMarks = (submission.evaluation.review && submission.evaluation.review.teacherMarks) || null;
+  const teacherText = (submission.evaluation.review && submission.evaluation.review.teacherEditedText) || null;
+  const ocrText = (submission.evaluation.ocr && submission.evaluation.ocr.extractedText) || [];
+  return genAssignment.questions.map(q=>{
+    const qr = results.find(r=>r.questionId===q.id);
+    if(!qr) return null;
+    const max = qr.maxMarks || q.marks;
+    const earned = teacherMarks && teacherMarks[q.id]!=null ? teacherMarks[q.id] : qr.suggestedMarks;
+    const pct = max ? (Number(earned)||0)/max*100 : 0;
+    const correctness = pct>=90 ? 'Correct' : pct>0 ? 'Partially Correct' : 'Incorrect';
+    const answer = (teacherText && teacherText[q.id]!=null) ? teacherText[q.id] : (ocrText.find(e=>e.questionId===q.id)||{}).text;
+    return {
+      questionId:q.id, text:q.text, topicTag:q.topicTag, maxMarks:max, earnedMarks:earned, correctness,
+      studentAnswer:answer||'(no extracted answer recorded)', reasoning:qr.reasoning||'', misconceptions:qr.misconceptions||[], flags:qr.flags||[],
+    };
+  }).filter(Boolean);
 }
 
 /* Demo mock generator — never claims to be a live AI model. Every
@@ -2827,10 +2879,19 @@ function mockGenerateStudentFeedback(studentName){
 
   const lectures = load(SK.lectures, []);
   const findLecture = t => lectures.find(l=>l.board===t.board && String(l.class)===String(t.class) && l.subject===t.subject && (l.chapter===t.chapter || l.topic===t.topic));
-  const weakTopics = ev.topics.filter(t=>t.evidenceCount>=2 && t.masteryPercent<70).sort((a,b)=>a.masteryPercent-b.masteryPercent);
+  const weakTopics = ev.weakTopics, strongTopics = ev.strongTopics;
   const limitedTopics = ev.topics.filter(t=>t.evidenceCount<2);
   const recurringIssues = ev.misconceptions.filter(m=>m.count>=2);
   const onceIssues = ev.misconceptions.filter(m=>m.count===1);
+
+  const avgScore = Math.round(ev.evaluated.reduce((s,x)=>s+(x.score||0),0)/ev.evaluated.length);
+  const summary = `Based on ${ev.evaluated.length} evaluated assignment(s), averaging ${avgScore}% overall. `
+    + (strongTopics.length ? `Doing well in ${strongTopics.length} topic area(s). ` : '')
+    + (weakTopics.length ? `${weakTopics.length} topic area(s) need focused revision.` : 'No topic currently shows a confirmed weakness with enough evidence.');
+
+  const strengths = strongTopics.length
+    ? strongTopics.map(t=>`Strong understanding of "${t.topic}" (${boardLabel(t.board)}, Class ${t.class}, ${t.subject}) — averaging ${t.masteryPercent}% across ${t.evidenceCount} data point(s).`)
+    : ['No topic yet has enough evidence (2+ data points) at 80%+ to confirm as a clear strength.'];
 
   const improvementSuggestions = weakTopics.length
     ? weakTopics.map(t=>`Focus on "${t.topic}" (${boardLabel(t.board)}, Class ${t.class}, ${t.subject}) — averaging ${t.masteryPercent}% across ${t.evidenceCount} data point(s).`)
@@ -2853,17 +2914,38 @@ function mockGenerateStudentFeedback(studentName){
   return {
     ok:true,
     evidence:{evaluatedCount:ev.evaluated.length, topics:ev.topics, recurringIssues, onceIssues, limitedTopics},
-    improvementSuggestions, practiceQuestions, revisionTopics,
+    summary, strengths, improvementSuggestions, practiceQuestions, revisionTopics,
   };
 }
 
-const PerfState = { tab:'overview', studentName:'' };
+const PerfState = { tab:'overview', studentName:'', filterSubject:'', filterChapter:'', expandedSubs:new Set() };
+/* Demo stand-in for a logged-in student identity (see Settings/Limitations
+   and EVALUATION_BACKEND.md — a real backend must verify this from a
+   session/auth token, never trust a client-picked name). */
+const StudentSelfState = { name:'' };
 
 VIEWS.performance = function(){
   const canEvaluate = isTeacherOrAdmin();
   const subs = load(SK.submissions, []);
   const assignments = load(SK.assignments, []);
   const evaluated = subs.filter(s=>s.status==='Evaluated');
+  const studentNames = uniqueSorted(subs.map(s=>s.studentName));
+
+  if(!canEvaluate){
+    return `
+      <div class="section-title">Performance &amp; Feedback</div>
+      <div class="section-sub">View your results and any feedback your teacher has published.</div>
+      <div class="info-banner">${ico('shield')}<div>This demo has no real student login. Pick a name below to see what that student would see — a real app must verify the logged-in student's identity on the backend before showing this, never trust a name chosen on the client (see <code>EVALUATION_BACKEND.md</code>).</div></div>
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-head"><h3>Who are you? <span class="demo-label">Demo identity</span></h3></div>
+        ${!studentNames.length ? emptyState('submissions','No student records yet.') : `
+        <select id="perf-self-select">
+          <option value="">Select your name...</option>
+          ${studentNames.map(n=>`<option value="${escapeHtml(n)}" ${n===StudentSelfState.name?'selected':''}>${escapeHtml(n)}</option>`).join('')}
+        </select>`}
+      </div>
+      <div id="perf-my-feedback"></div>`;
+  }
 
   const subjAvg = {};
   evaluated.forEach(s=>{
@@ -2873,7 +2955,6 @@ VIEWS.performance = function(){
     subjAvg[subj].sum += s.score; subjAvg[subj].n += 1;
   });
   const chartRows = Object.keys(subjAvg).map(k=>({label:k, value:Math.round(subjAvg[k].sum/subjAvg[k].n)}));
-  const studentNames = uniqueSorted(subs.map(s=>s.studentName));
 
   const overviewHtml = `
     <div class="card" style="margin-bottom:20px;">
@@ -2884,7 +2965,7 @@ VIEWS.performance = function(){
         <div class="bar-val">${r.value}%</div></div>`).join('')}</div>` : emptyState('performance','No evaluated submissions yet.')}
     </div>
     <div class="card">
-      <div class="card-head"><h3>${State.role==='student'?'My Results':'Student Results'}</h3></div>
+      <div class="card-head"><h3>Student Results</h3></div>
       <div class="table-wrap">
         ${evaluated.length ? `<table><thead><tr><th>Student</th><th>Assignment</th><th>Score</th><th>Feedback</th></tr></thead><tbody>
           ${evaluated.map(s=>{
@@ -2896,18 +2977,16 @@ VIEWS.performance = function(){
 
   return `
     <div class="section-title">Performance &amp; Feedback</div>
-    <div class="section-sub">${canEvaluate?'Class-wide scores, plus per-student evidence and AI-suggested feedback for review.':'Illustrative scores and feedback from the manual demo evaluations above.'}</div>
-    <div class="info-banner">${ico('performance')}<div>Scores shown as <b>Evaluated</b> come from the demo's own submission records (manual or Phase 5 AI-assisted evaluation); any AI-suggested feedback below is a <b>demo interpretation</b>, not a live AI model, and is never official until a teacher approves it.</div></div>
+    <div class="section-sub">Class-wide scores, plus per-student evidence and AI-suggested feedback for review.</div>
+    <div class="info-banner">${ico('performance')}<div>Scores shown as <b>Evaluated</b> come from the demo's own submission records (manual or AI-assisted evaluation); any AI-suggested feedback below is a <b>demo interpretation</b>, not a live AI model, and is never shown to a student until a teacher approves <i>and</i> publishes it.</div></div>
 
-    ${canEvaluate?`
     <div class="tabs">
       <div class="tab-btn ${PerfState.tab==='overview'?'active':''}" data-tab="overview">Class Overview</div>
       <div class="tab-btn ${PerfState.tab==='student'?'active':''}" data-tab="student">Student Detail</div>
-    </div>` : ''}
+    </div>
 
-    <div id="perf-tab-overview" class="${canEvaluate && PerfState.tab!=='overview' ? 'hidden':''}">${overviewHtml}</div>
+    <div id="perf-tab-overview" class="${PerfState.tab!=='overview' ? 'hidden':''}">${overviewHtml}</div>
 
-    ${canEvaluate?`
     <div id="perf-tab-student" class="${PerfState.tab!=='student'?'hidden':''}">
       <div class="card" style="margin-bottom:20px;">
         <div class="card-head"><h3>Select a Student</h3></div>
@@ -2918,20 +2997,47 @@ VIEWS.performance = function(){
         </select>`}
       </div>
       <div id="perf-student-detail"></div>
-    </div>`:''}`;
+    </div>`;
 };
+
+function renderQuestionWiseBlock(qrows){
+  if(!qrows) return `<p class="hint">Question-level detail isn't available for this submission — it was evaluated manually as a single overall score, not through AI-assisted grading against an approved question set.</p>`;
+  if(!qrows.length) return `<p class="hint">No question-level results were returned for this submission.</p>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Question</th><th>Student's Answer</th><th>Marks</th><th>Result</th></tr></thead><tbody>
+    ${qrows.map(q=>{
+      const pillClass = q.correctness==='Correct'?'pill-evaluated':q.correctness==='Partially Correct'?'pill-pending':'pill-overdue';
+      return `<tr>
+        <td style="max-width:240px;">${escapeHtml(q.text)}${q.topicTag?`<div class="hint">${escapeHtml(q.topicTag)}</div>`:''}</td>
+        <td style="max-width:240px;">${escapeHtml(q.studentAnswer)}</td>
+        <td style="white-space:nowrap;">${q.earnedMarks}/${q.maxMarks}</td>
+        <td><span class="pill ${pillClass}">${q.correctness}</span>${q.flags&&q.flags.length?`<div class="hint">${q.flags.map(f=>escapeHtml(f)).join(', ')}</div>`:''}</td>
+      </tr>`;
+    }).join('')}
+  </tbody></table></div>`;
+}
 
 function renderStudentDetail(){
   const box = $('#perf-student-detail'); if(!box) return;
   const name = PerfState.studentName;
   if(!name){ box.innerHTML = ''; return; }
-  const ev = computeStudentEvidence(name);
+
+  const allSubsUnfiltered = load(SK.submissions, []).filter(s=>s.studentName===name);
   const assignments = load(SK.assignments, []);
+  const subjectOptions_ = uniqueSorted(allSubsUnfiltered.map(s=>s.subject));
+  const chapterOptions_ = uniqueSorted(allSubsUnfiltered.map(s=>{ const a=assignments.find(x=>x.id===s.assignmentId); return a?a.chapter:null; }));
+
+  const ev = computeStudentEvidence(name, {subject:PerfState.filterSubject, chapter:PerfState.filterChapter});
 
   const historyRows = ev.allSubmissions.map(s=>{
     const a = assignments.find(x=>x.id===s.assignmentId);
-    return `<tr><td>${fmtDate(s.submittedAt)}</td><td>${a?escapeHtml(a.title):'—'}</td><td>${a?boardLabel(a.board)+' · Class '+a.class+' · '+escapeHtml(a.subject):'—'}</td>
-      <td><span class="pill ${statusPillClass(s.status)}">${s.status}</span></td><td>${s.score!=null?s.score+'%':'—'}</td></tr>`;
+    const expanded = PerfState.expandedSubs.has(s.id);
+    const qrows = s.status==='Evaluated' ? getQuestionWiseResults(s) : null;
+    return `<tr>
+        <td>${fmtDate(s.submittedAt)}</td><td>${a?escapeHtml(a.title):'—'}</td><td>${a?boardLabel(a.board)+' · Class '+a.class+' · '+escapeHtml(a.subject):'—'}</td>
+        <td><span class="pill ${statusPillClass(s.status)}">${s.status}</span></td><td>${s.score!=null?s.score+'%':'—'}</td>
+        <td>${s.status==='Evaluated'?`<button type="button" class="btn btn-sm" data-action="perf-toggle-q" data-id="${s.id}">${expanded?'Hide':'View'} Questions</button>`:'—'}</td>
+      </tr>
+      ${expanded?`<tr><td colspan="6" style="background:var(--bg);">${renderQuestionWiseBlock(qrows)}</td></tr>`:''}`;
   }).join('');
 
   const topicRows = ev.topics.length ? ev.topics.map(t=>{
@@ -2942,6 +3048,13 @@ function renderStudentDetail(){
       <div class="bar-val">${limited?`<span class="pill pill-neutral">Limited evidence</span>`:t.masteryPercent+'%'}</div>
     </div>`;
   }).join('') : '';
+
+  const strengthsHtml = ev.strongTopics.length
+    ? `<ul style="margin:0 0 10px;padding-left:18px;font-size:12.5px;color:var(--text-600);">${ev.strongTopics.map(t=>`<li>${escapeHtml(t.topic)} — ${t.masteryPercent}% (${t.evidenceCount} data points)</li>`).join('')}</ul>`
+    : `<p class="hint" style="margin-bottom:10px;">No topic yet has 2+ data points at 80%+ to confirm as a clear strength.</p>`;
+  const weakHtml = ev.weakTopics.length
+    ? `<ul style="margin:0 0 10px;padding-left:18px;font-size:12.5px;color:var(--text-600);">${ev.weakTopics.map(t=>`<li>${escapeHtml(t.topic)} — ${t.masteryPercent}% (${t.evidenceCount} data points)</li>`).join('')}</ul>`
+    : `<p class="hint" style="margin-bottom:10px;">No topic currently falls below 70% with 2+ data points.</p>`;
 
   const trendEligible = ev.evaluated.length >= 3;
   const trendHtml = trendEligible
@@ -2958,20 +3071,32 @@ function renderStudentDetail(){
           <div style="font-size:12.5px;color:var(--text-600);">${escapeHtml(m.text)}<div class="hint">From: ${m.refs.map(r=>escapeHtml(r.assignmentTitle)).join(', ')}</div></div>
         </div>`).join('')}
       </div>`
-    : `<p class="hint">No AI-evaluated submissions with flagged misconceptions yet — this requires Phase 5 AI evaluation data, not just a manual score.</p>`;
+    : `<p class="hint">No AI-evaluated submissions with flagged misconceptions yet — this requires AI-assisted evaluation data, not just a manual score.</p>`;
 
   const fb = load(SK.studentFeedback, []).find(f=>f.studentName===name);
   const canGenerate = ev.evaluated.length >= 2;
 
   box.innerHTML = `
     <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Filter Evidence</h3></div>
+      <div class="field-row">
+        <div class="field"><label>Subject</label><select id="perf-filter-subject"><option value="">All subjects</option>${subjectOptions_.map(s=>`<option value="${escapeHtml(s)}" ${s===PerfState.filterSubject?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select></div>
+        <div class="field"><label>Chapter</label><select id="perf-filter-chapter"><option value="">All chapters</option>${chapterOptions_.map(c=>`<option value="${escapeHtml(c)}" ${c===PerfState.filterChapter?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px;">
       <div class="card-head"><h3>Evidence Summary <span class="demo-label">Evidence</span></h3></div>
-      <p class="hint" style="margin-bottom:10px;">Assignment History</p>
+      <p class="hint" style="margin-bottom:10px;">Assignment History — expand a row for question-wise results</p>
       <div class="table-wrap" style="margin-bottom:16px;">
-        ${historyRows ? `<table><thead><tr><th>Date</th><th>Assignment</th><th>Board/Class/Subject</th><th>Status</th><th>Score</th></tr></thead><tbody>${historyRows}</tbody></table>` : emptyState('submissions','No submissions for this student yet.')}
+        ${historyRows ? `<table><thead><tr><th>Date</th><th>Assignment</th><th>Board/Class/Subject</th><th>Status</th><th>Score</th><th></th></tr></thead><tbody>${historyRows}</tbody></table>` : emptyState('submissions','No submissions match these filters.')}
       </div>
       <p class="hint" style="margin-bottom:10px;">Topic-Level Mastery (from evaluated work only)</p>
       ${topicRows ? `<div class="bar-chart" style="margin-bottom:16px;">${topicRows}</div>` : `<p class="hint" style="margin-bottom:16px;">No evaluated submissions yet to break down by topic.</p>`}
+      <div class="grid grid-2" style="margin-bottom:16px;">
+        <div><b style="font-size:12.5px;">Strengths</b>${strengthsHtml}</div>
+        <div><b style="font-size:12.5px;">Needs Improvement</b>${weakHtml}</div>
+      </div>
       <p class="hint" style="margin-bottom:10px;">Progress Over Time</p>
       ${trendHtml}
     </div>
@@ -2983,6 +3108,16 @@ function renderStudentDetail(){
 
     <div class="card" id="perf-feedback-card"></div>`;
 
+  $('#perf-filter-subject').addEventListener('change', function(){ PerfState.filterSubject = this.value; renderStudentDetail(); });
+  $('#perf-filter-chapter').addEventListener('change', function(){ PerfState.filterChapter = this.value; renderStudentDetail(); });
+  $('#perf-student-detail').querySelectorAll('[data-action="perf-toggle-q"]').forEach(btn=>{
+    btn.addEventListener('click', function(){
+      const id = this.dataset.id;
+      if(PerfState.expandedSubs.has(id)) PerfState.expandedSubs.delete(id); else PerfState.expandedSubs.add(id);
+      renderStudentDetail();
+    });
+  });
+
   renderFeedbackCard(name, fb, canGenerate, ev.evaluated.length);
 }
 
@@ -2992,7 +3127,7 @@ function renderFeedbackCard(name, fb, canGenerate, evaluatedCount){
     box.innerHTML = `
       <div class="card-head"><h3>AI-Suggested Feedback <span class="demo-label">Demo mock AI</span></h3></div>
       ${canGenerate
-        ? `<p class="hint" style="margin-bottom:12px;">Generates improvement suggestions, practice questions and revision links from this student's evidence above. Always starts as provisional — nothing is official until approved.</p>
+        ? `<p class="hint" style="margin-bottom:12px;">Generates a performance summary, strengths, improvement suggestions, practice questions and revision links from this student's evidence above. Always starts as a <b>Draft</b> — nothing is shown to the student until it's Approved and Published.</p>
            <button type="button" class="btn btn-primary" id="perf-generate-btn">${ico('plus')} Generate AI Feedback (Demo)</button>`
         : `<div class="info-banner">${ico('shield')}<div>Not enough evaluated work yet to generate reliable feedback suggestions (need at least 2 evaluated submissions; currently ${evaluatedCount}).</div></div>`}`;
     const btn = $('#perf-generate-btn');
@@ -3000,12 +3135,15 @@ function renderFeedbackCard(name, fb, canGenerate, evaluatedCount){
     return;
   }
 
-  const statusPill = fb.status==='Approved' ? 'pill-evaluated' : 'pill-pending';
+  const pillClass = {Draft:'pill-pending', 'Pending Teacher Review':'pill-overdue', Approved:'pill-open', Published:'pill-evaluated'}[fb.status] || 'pill-neutral';
+  const readOnly = fb.status==='Published';
   box.innerHTML = `
-    <div class="card-head"><h3>AI-Suggested Feedback <span class="demo-label">Demo mock AI</span> <span class="pill ${statusPill}">${fb.status}</span></h3></div>
-    <p class="hint">Generated ${fmtDate(fb.generatedAt)}${fb.approvedAt?' · Approved '+fmtDate(fb.approvedAt):''}</p>
+    <div class="card-head"><h3>AI-Suggested Feedback <span class="demo-label">Demo mock AI</span> <span class="pill ${pillClass}">${fb.status}</span></h3></div>
+    <p class="hint">Generated ${fmtDate(fb.generatedAt)}${fb.approvedAt?' · Approved '+fmtDate(fb.approvedAt):''}${fb.publishedAt?' · Published '+fmtDate(fb.publishedAt):''}</p>
 
-    <div class="field"><label>Improvement Suggestions (editable)</label><textarea id="perf-fb-suggestions" rows="4">${escapeHtml(fb.improvementSuggestions.join('\n'))}</textarea></div>
+    <div class="field"><label>Performance Summary</label><textarea id="perf-fb-summary" rows="2" ${readOnly?'disabled':''}>${escapeHtml(fb.summary||'')}</textarea></div>
+    <div class="field"><label>Strengths (editable, one per line)</label><textarea id="perf-fb-strengths" rows="3" ${readOnly?'disabled':''}>${escapeHtml((fb.strengths||[]).join('\n'))}</textarea></div>
+    <div class="field"><label>Improvement Suggestions (editable, one per line)</label><textarea id="perf-fb-suggestions" rows="4" ${readOnly?'disabled':''}>${escapeHtml(fb.improvementSuggestions.join('\n'))}</textarea></div>
 
     <p class="hint" style="margin:10px 0 4px;"><b>Suggested Practice</b> (linked to evidence above)</p>
     ${fb.practiceQuestions.length ? fb.practiceQuestions.map(p=>`<div class="card" style="background:var(--bg);margin-bottom:8px;">
@@ -3018,12 +3156,15 @@ function renderFeedbackCard(name, fb, canGenerate, evaluatedCount){
         ${escapeHtml(r.topic)} (${boardLabel(r.board)}, Class ${r.class}) — ${r.lectureId?`<a href="#" data-lecture-link="${r.lectureId}">Review: ${escapeHtml(r.lectureTitle)}</a>`:'<span class="hint">No matching lecture found yet.</span>'}
       </div>`).join('') : '<p class="hint">No revision topics suggested — no topic currently falls below the evidence threshold.</p>'}
 
-    <div class="field" style="margin-top:14px;"><label>Teacher Notes (optional)</label><textarea id="perf-fb-notes" rows="3">${escapeHtml(fb.teacherNotes||'')}</textarea></div>
+    <div class="field" style="margin-top:14px;"><label>Teacher Notes <span class="hint" style="font-weight:400;">(private — never shown to the student)</span></label><textarea id="perf-fb-notes" rows="3" ${readOnly?'disabled':''}>${escapeHtml(fb.teacherNotes||'')}</textarea></div>
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-      <button type="button" class="btn btn-primary" id="perf-fb-save">Save Changes</button>
+      ${!readOnly?`<button type="button" class="btn btn-primary" id="perf-fb-save">Save Changes</button>`:''}
       <button type="button" class="btn" id="perf-fb-regenerate">Regenerate</button>
-      ${fb.status==='Provisional'?`<button type="button" class="btn" id="perf-fb-approve">Approve</button>`:`<button type="button" class="btn" id="perf-fb-revert">Revert to Provisional</button>`}
+      ${fb.status==='Draft'?`<button type="button" class="btn" id="perf-fb-submit-review">Submit for Review</button>`:''}
+      ${fb.status==='Pending Teacher Review'?`<button type="button" class="btn" id="perf-fb-approve">Approve</button><button type="button" class="btn" id="perf-fb-back-draft">Send Back to Draft</button>`:''}
+      ${fb.status==='Approved'?`<button type="button" class="btn btn-primary" id="perf-fb-publish">Publish</button><button type="button" class="btn" id="perf-fb-back-draft">Revert to Draft</button>`:''}
+      ${fb.status==='Published'?`<button type="button" class="btn" id="perf-fb-revise">Revise (Unpublish)</button>`:''}
     </div>
 
     ${fb.auditTrail&&fb.auditTrail.length?`<div style="margin-top:14px;"><b style="font-size:12.5px;">Audit Trail</b>
@@ -3044,15 +3185,16 @@ function generateFeedbackFor(name){
   if(!result.ok){ toast('Not enough evaluated work to generate feedback yet.','error'); return; }
   const all = load(SK.studentFeedback, []).filter(f=>f.studentName!==name);
   const fb = {
-    id:uid('fb'), studentName:name, generatedAt:new Date().toISOString(), status:'Provisional',
-    approvedAt:null, approvedBy:null, evidence:result.evidence,
+    id:uid('fb'), studentName:name, generatedAt:new Date().toISOString(), status:'Draft',
+    approvedAt:null, approvedBy:null, publishedAt:null, publishedBy:null, evidence:result.evidence,
+    summary:result.summary, strengths:result.strengths,
     improvementSuggestions:result.improvementSuggestions, practiceQuestions:result.practiceQuestions, revisionTopics:result.revisionTopics,
     teacherNotes:'', auditTrail:[],
   };
   appendFeedbackAudit(fb, 'generated', `Demo mock AI generated suggestions from ${result.evidence.evaluatedCount} evaluated submission(s).`);
   all.push(fb);
   save(SK.studentFeedback, all);
-  toast('Provisional feedback generated — review before approving.','success');
+  toast('Draft feedback generated — review before submitting.','success');
   renderFeedbackCard(name, fb, true, result.evidence.evaluatedCount);
 }
 
@@ -3060,21 +3202,24 @@ function wireFeedbackCard(name){
   $('#perf-fb-save')?.addEventListener('click', function(){
     const all = load(SK.studentFeedback, []);
     const fb = all.find(f=>f.studentName===name); if(!fb) return;
+    fb.summary = $('#perf-fb-summary').value;
+    fb.strengths = $('#perf-fb-strengths').value.split('\n').map(s=>s.trim()).filter(Boolean);
     fb.improvementSuggestions = $('#perf-fb-suggestions').value.split('\n').map(s=>s.trim()).filter(Boolean);
     fb.teacherNotes = $('#perf-fb-notes').value;
-    appendFeedbackAudit(fb, 'teacher_edited', 'Teacher edited suggestions and/or notes.');
+    appendFeedbackAudit(fb, 'teacher_edited', 'Teacher edited summary, strengths, suggestions and/or notes.');
     save(SK.studentFeedback, all);
     toast('Changes saved.','success');
     renderFeedbackCard(name, fb, true, fb.evidence.evaluatedCount);
   });
 
   $('#perf-fb-regenerate')?.addEventListener('click', function(){
-    confirmAction('Regenerate feedback?','This replaces the current suggestions with a new demo-generated set from the latest evidence. Teacher notes are kept; edited suggestions are not.', ()=>{
+    confirmAction('Regenerate feedback?','This replaces the current summary, strengths and suggestions with a new demo-generated set from the latest evidence. Teacher notes are kept; edited text is not.', ()=>{
       const result = mockGenerateStudentFeedback(name);
       if(!result.ok){ toast('Not enough evaluated work to regenerate.','error'); return; }
       const all = load(SK.studentFeedback, []);
       const fb = all.find(f=>f.studentName===name); if(!fb) return;
-      fb.evidence = result.evidence; fb.improvementSuggestions = result.improvementSuggestions;
+      fb.evidence = result.evidence; fb.summary = result.summary; fb.strengths = result.strengths;
+      fb.improvementSuggestions = result.improvementSuggestions;
       fb.practiceQuestions = result.practiceQuestions; fb.revisionTopics = result.revisionTopics;
       fb.generatedAt = new Date().toISOString();
       appendFeedbackAudit(fb, 'regenerated', `Regenerated from ${result.evidence.evaluatedCount} evaluated submission(s).`);
@@ -3084,24 +3229,59 @@ function wireFeedbackCard(name){
     });
   });
 
+  $('#perf-fb-submit-review')?.addEventListener('click', function(){
+    const all = load(SK.studentFeedback, []);
+    const fb = all.find(f=>f.studentName===name); if(!fb) return;
+    fb.status = 'Pending Teacher Review';
+    appendFeedbackAudit(fb, 'submitted_for_review', 'Submitted draft for teacher review.');
+    save(SK.studentFeedback, all);
+    toast('Submitted for review.','success');
+    renderFeedbackCard(name, fb, true, fb.evidence.evaluatedCount);
+  });
+
   $('#perf-fb-approve')?.addEventListener('click', function(){
     const all = load(SK.studentFeedback, []);
     const fb = all.find(f=>f.studentName===name); if(!fb) return;
     fb.status = 'Approved'; fb.approvedAt = new Date().toISOString(); fb.approvedBy = State.role;
-    appendFeedbackAudit(fb, 'approved', 'Teacher approved this feedback as official.');
+    appendFeedbackAudit(fb, 'approved', 'Teacher approved this feedback.');
     save(SK.studentFeedback, all);
     toast('Feedback approved.','success');
     renderFeedbackCard(name, fb, true, fb.evidence.evaluatedCount);
   });
 
-  $('#perf-fb-revert')?.addEventListener('click', function(){
+  $('#perf-fb-back-draft')?.addEventListener('click', function(){
     const all = load(SK.studentFeedback, []);
     const fb = all.find(f=>f.studentName===name); if(!fb) return;
-    fb.status = 'Provisional'; fb.approvedAt = null; fb.approvedBy = null;
-    appendFeedbackAudit(fb, 'reverted', 'Teacher reverted this feedback to provisional for further edits.');
+    const was = fb.status;
+    fb.status = 'Draft'; fb.approvedAt = null; fb.approvedBy = null;
+    appendFeedbackAudit(fb, 'sent_back_to_draft', `Moved back to Draft from ${was} for further edits.`);
     save(SK.studentFeedback, all);
-    toast('Reverted to provisional.','success');
+    toast('Moved back to Draft.','success');
     renderFeedbackCard(name, fb, true, fb.evidence.evaluatedCount);
+  });
+
+  $('#perf-fb-publish')?.addEventListener('click', function(){
+    confirmAction('Publish this feedback?','The student will be able to see the summary, strengths, improvement suggestions and revision recommendations below — never your private teacher notes. Continue?', ()=>{
+      const all = load(SK.studentFeedback, []);
+      const fb = all.find(f=>f.studentName===name); if(!fb) return;
+      fb.status = 'Published'; fb.publishedAt = new Date().toISOString(); fb.publishedBy = State.role;
+      appendFeedbackAudit(fb, 'published', 'Teacher published this feedback to the student.');
+      save(SK.studentFeedback, all);
+      toast('Feedback published.','success');
+      renderFeedbackCard(name, fb, true, fb.evidence.evaluatedCount);
+    });
+  });
+
+  $('#perf-fb-revise')?.addEventListener('click', function(){
+    confirmAction('Revise published feedback?','This unpublishes it immediately — the student will not see it again until you publish the revised version.', ()=>{
+      const all = load(SK.studentFeedback, []);
+      const fb = all.find(f=>f.studentName===name); if(!fb) return;
+      fb.status = 'Draft'; fb.publishedAt = null; fb.publishedBy = null;
+      appendFeedbackAudit(fb, 'unpublished_for_revision', 'Teacher unpublished this feedback to revise it.');
+      save(SK.studentFeedback, all);
+      toast('Unpublished — now editable as a draft.','success');
+      renderFeedbackCard(name, fb, true, fb.evidence.evaluatedCount);
+    }, true);
   });
 
   $('#perf-feedback-card')?.querySelectorAll('[data-lecture-link]').forEach(a=>{
@@ -3113,7 +3293,67 @@ function wireFeedbackCard(name){
   });
 }
 
+/* Student-facing view: shows ONLY feedback with status 'Published' for the
+   selected demo identity, in supportive, class-appropriate language. Never
+   shows teacher notes, audit trail, or raw evidence internals. */
+function renderMyFeedback(){
+  const box = $('#perf-my-feedback'); if(!box) return;
+  const name = StudentSelfState.name;
+  if(!name){ box.innerHTML = ''; return; }
+
+  const subs = load(SK.submissions, []).filter(s=>s.studentName===name && s.status==='Evaluated');
+  const assignments = load(SK.assignments, []);
+  const resultsHtml = subs.length
+    ? `<table><thead><tr><th>Assignment</th><th>Score</th></tr></thead><tbody>
+        ${subs.map(s=>{ const a=assignments.find(x=>x.id===s.assignmentId); return `<tr><td>${a?escapeHtml(a.title):'—'}</td><td>${s.score}%</td></tr>`; }).join('')}
+      </tbody></table>`
+    : emptyState('performance','No evaluated results released yet.');
+
+  const fb = load(SK.studentFeedback, []).find(f=>f.studentName===name && f.status==='Published');
+
+  if(!fb){
+    box.innerHTML = `
+      <div class="card" style="margin-bottom:20px;"><div class="card-head"><h3>My Results</h3></div><div class="table-wrap">${resultsHtml}</div></div>
+      <div class="info-banner">${ico('shield')}<div>Your teacher hasn't published feedback yet. Check back after your next evaluated assignment.</div></div>`;
+    return;
+  }
+
+  const band = getClassBand(subs[0] ? subs[0].class : '5');
+  const intro = (band.key==='foundation'||band.key==='elementary')
+    ? 'Great effort! Here is what your teacher wants you to know:'
+    : 'Here is a detailed breakdown from your teacher to guide your revision:';
+
+  box.innerHTML = `
+    <div class="card" style="margin-bottom:20px;"><div class="card-head"><h3>My Results</h3></div><div class="table-wrap">${resultsHtml}</div></div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>My Feedback <span class="pill pill-evaluated">Published</span></h3></div>
+      <p class="hint" style="margin-bottom:10px;">${escapeHtml(intro)}</p>
+      <p style="font-size:13px;margin-bottom:12px;">${escapeHtml(fb.summary||'')}</p>
+      <b style="font-size:12.5px;">What you're doing well</b>
+      <ul style="margin:6px 0 12px;padding-left:18px;font-size:13px;color:var(--text-600);">${(fb.strengths||[]).map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>
+      <b style="font-size:12.5px;">Areas to improve</b>
+      <ul style="margin:6px 0 12px;padding-left:18px;font-size:13px;color:var(--text-600);">${fb.improvementSuggestions.map(s=>`<li>${escapeHtml(s)}</li>`).join('')}</ul>
+      ${fb.practiceQuestions.length?`<b style="font-size:12.5px;">Try these</b>
+      <ul style="margin:6px 0 12px;padding-left:18px;font-size:13px;color:var(--text-600);">${fb.practiceQuestions.map(p=>`<li>${escapeHtml(p.text)}</li>`).join('')}</ul>`:''}
+      ${fb.revisionTopics.some(r=>r.lectureId)?`<b style="font-size:12.5px;">Helpful lectures</b>
+      <ul style="margin:6px 0 0;padding-left:18px;font-size:13px;">${fb.revisionTopics.filter(r=>r.lectureId).map(r=>`<li><a href="#" data-lecture-link="${r.lectureId}">${escapeHtml(r.lectureTitle)}</a></li>`).join('')}</ul>`:''}
+    </div>`;
+
+  box.querySelectorAll('[data-lecture-link]').forEach(a=>{
+    a.addEventListener('click', function(e){ e.preventDefault(); navigate('lectures'); });
+  });
+}
+
 PAGE_INIT.performance = function(){
+  if(!isTeacherOrAdmin()){
+    const sel = $('#perf-self-select');
+    if(sel){
+      sel.addEventListener('change', function(){ StudentSelfState.name = this.value; renderMyFeedback(); });
+      if(StudentSelfState.name) renderMyFeedback();
+    }
+    return;
+  }
+
   $$('.tabs .tab-btn').forEach(btn=>{
     btn.addEventListener('click', function(){
       PerfState.tab = this.dataset.tab;
@@ -3124,6 +3364,7 @@ PAGE_INIT.performance = function(){
   if(sel){
     sel.addEventListener('change', function(){
       PerfState.studentName = this.value;
+      PerfState.filterSubject = ''; PerfState.filterChapter = ''; PerfState.expandedSubs = new Set();
       renderStudentDetail();
     });
     if(PerfState.studentName) renderStudentDetail();
@@ -3556,7 +3797,7 @@ VIEWS.settings = function(){
         <li>Curriculum chapters and topics are illustrative and have not been verified against official syllabi.</li>
         <li>Image uploads are previewed locally in the browser only and are never stored or transmitted, unless you configure a real evaluation backend above.</li>
         <li>AI evaluation of handwritten submissions (Phase 5) only runs against a backend you configure and deploy yourself; without one, evaluation attempts fail honestly rather than producing fabricated results.</li>
-        <li>Per-student performance evidence and AI-suggested feedback (Phase 6) are computed from this demo's own submission records; the demo role switch is not a real access-control boundary — a real backend must authorize which students a given teacher may view (see EVALUATION_BACKEND.md).</li>
+        <li>Per-student performance evidence and AI-suggested feedback are computed from this demo's own submission records; the demo role switch is not a real access-control boundary — a real backend must authorize which students a given teacher may view, <b>and</b> verify a student's own identity before showing them anything (see EVALUATION_BACKEND.md). The "Who are you?" picker on the student side is a demo stand-in for login, not authentication.</li>
         <li>All data is stored in this browser's localStorage and is not shared between devices.</li>
       </ul>
     </div>`;
@@ -3620,6 +3861,7 @@ PAGE_INIT.settings = function(){
 seedData();
 migrateLectureSchema();
 migrateSubmissionSchema();
+migrateStudentFeedbackSchema();
 const savedRole = load(SK.role, null);
 if(savedRole){
   State.role = savedRole;

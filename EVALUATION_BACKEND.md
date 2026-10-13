@@ -124,14 +124,24 @@ Handwritten student work and scores are sensitive. Your backend must, at minimum
   session token or API key issued to the teacher's account) and check it on
   every call. An unauthenticated endpoint that accepts arbitrary images and
   returns grading data is not safe to expose publicly.
-- **Authorize per-student access on every read, not just on upload.** Phase
-  6's per-student performance view (evidence, topic mastery, AI-suggested
+- **Authorize per-student access on every read, not just on upload.** The
+  per-student performance view (evidence, topic mastery, AI-suggested
   feedback) calls the same backend surface to read records back. Before
   returning anything, check server-side that the authenticated teacher is
   actually assigned to that student's class/section — never trust a
   student name or ID supplied by the client as proof of authorization.
   The frontend's role switch (Teacher/Student/Administrator) is a UI
   convenience only; it enforces nothing.
+- **Verify the student's own identity for the student-facing feedback
+  view.** This demo's "Who are you?" picker lets anyone select any
+  student's name on the client — it is explicitly a stand-in for a real
+  login, not a security control. A real backend must derive the requesting
+  student's identity from their authenticated session and return only
+  *that* student's own published feedback, ignoring (or rejecting) any
+  student name/ID the client tries to supply. It must also never return a
+  `Draft`, `Pending Teacher Review`, or `Approved`-but-not-`Published`
+  feedback record to a student under any circumstance, nor a teacher's
+  private notes.
 - **Keep provider credentials server-side only** — environment variables or
   a secrets manager, never committed to source control, never sent to the client.
 - **Re-validate uploads server-side**: file type (magic-byte sniffing, not
