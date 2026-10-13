@@ -532,6 +532,7 @@ const SK = {
   generatedAssignments:'edupilot_generatedAssignments',
   evalBackendUrl:'edupilot_evalBackendUrl',
   studentFeedback:'edupilot_studentFeedback',
+  doubtBackendUrl:'edupilot_doubtBackendUrl',
 };
 function load(key, fallback){
   try{
@@ -572,6 +573,14 @@ function youtubeId(url){
   if(!url) return null;
   const m = String(url).match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
   return m ? m[1] : null;
+}
+/* Builds a canonical, working YouTube link regardless of the original URL's
+   style (watch/shorts/youtu.be) — with a start-time seek when seconds is
+   given, otherwise just the plain video link. */
+function buildYoutubeLink(url, seconds){
+  const id = youtubeId(url);
+  if(!id) return url;
+  return seconds!=null ? `https://www.youtube.com/watch?v=${id}&t=${Math.round(seconds)}s` : `https://www.youtube.com/watch?v=${id}`;
 }
 function debounce(fn, ms){
   let t; return function(...args){ clearTimeout(t); t = setTimeout(()=>fn.apply(this,args), ms||250); };
@@ -1167,6 +1176,16 @@ VIEWS.lectures = function(){
         <div class="field" style="margin-top:14px;"><label>Learning Objectives <span class="hint" style="font-weight:400;">(one per line, optional)</span></label><textarea name="objectives" placeholder="e.g.&#10;Understand what a fraction represents&#10;Add two fractions with the same denominator"></textarea></div>
         <div class="field"><label>Reference Notes <span class="hint" style="font-weight:400;">(optional)</span></label><textarea name="referenceNotes" placeholder="e.g. Refer to KTBS Mathematics Class 5, Chapter 4 for extra practice."></textarea></div>
 
+        <div class="field">
+          <label>Timestamped Segments <span class="hint" style="font-weight:400;">(optional — lets the AI Doubt Solver link an answer to a specific moment and open the video there)</span></label>
+          <div class="field-row" style="margin-bottom:8px;">
+            <input type="text" id="lec-segment-label" placeholder="e.g. Adding fractions with the same denominator">
+            <input type="text" id="lec-segment-time" placeholder="mm:ss, e.g. 2:45" style="max-width:140px;">
+            <button type="button" class="btn btn-sm" id="lec-segment-add" style="max-width:140px;">${ico('plus')} Add Segment</button>
+          </div>
+          <div id="lec-segments-list"></div>
+        </div>
+
         <div style="display:flex;gap:8px;margin-top:10px;">
           <button type="submit" class="btn btn-primary">${ico('plus')} Save Lecture</button>
           <button type="button" class="btn" id="lec-cancel-edit" style="display:none;">Cancel</button>
@@ -1209,6 +1228,33 @@ function refreshLectureSuggestionLists(form){
 }
 
 function uniqueSorted(arr){ return Array.from(new Set(arr.filter(Boolean))).sort(); }
+
+/* Transient, in-progress list of {label, seconds} for the lecture form —
+   not persisted until Save Lecture is clicked. */
+let LectureSegmentsDraft = [];
+
+function parseTimeToSeconds(str){
+  const parts = String(str||'').trim().split(':').map(Number);
+  if(!parts.length || parts.some(n=>isNaN(n)||n<0)) return null;
+  if(parts.length===1) return parts[0];
+  if(parts.length===2) return parts[0]*60+parts[1];
+  if(parts.length===3) return parts[0]*3600+parts[1]*60+parts[2];
+  return null;
+}
+function formatSecondsAsTime(total){
+  total = Math.max(0, Math.round(total));
+  const h = Math.floor(total/3600), m = Math.floor((total%3600)/60), s = total%60;
+  return h ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${m}:${String(s).padStart(2,'0')}`;
+}
+function renderLectureSegmentsList(){
+  const box = $('#lec-segments-list'); if(!box) return;
+  if(!LectureSegmentsDraft.length){ box.innerHTML = '<p class="hint">No segments added yet — the Doubt Solver will link to the start of the video instead.</p>'; return; }
+  box.innerHTML = LectureSegmentsDraft.map((seg,idx)=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
+      <div style="font-size:12.5px;"><b>${formatSecondsAsTime(seg.seconds)}</b> — ${escapeHtml(seg.label)}</div>
+      <button type="button" class="btn btn-icon btn-ghost" data-action="lec-segment-remove" data-idx="${idx}" title="Remove segment" aria-label="Remove segment">${ico('trash')}</button>
+    </div>`).join('');
+}
 
 function renderLecturePreview(url){
   const box = $('#lec-preview'); if(!box) return;
@@ -1302,7 +1348,10 @@ function renderLectureList(){
         ${objectives.length?`<div style="margin-bottom:10px;"><b style="font-size:12px;">Learning Objectives</b><ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-600);">${objectives.map(o=>`<li>${escapeHtml(o)}</li>`).join('')}</ul></div>`:''}
         ${l.referenceNotes?`<div style="margin-bottom:10px;"><b style="font-size:12px;">Reference Notes</b><p style="margin:4px 0 0;font-size:12.5px;color:var(--text-600);">${escapeHtml(l.referenceNotes)}</p></div>`:''}
         ${!objectives.length && !l.referenceNotes?'<p class="hint">No learning objectives or reference notes added for this lecture yet.</p>':''}
-        <div class="hint">Transcript &amp; timestamped segments: not available in this phase — coming in a future update.</div>
+        ${(l.segments&&l.segments.length)?`<div style="margin-top:10px;"><b style="font-size:12px;">Timestamped Segments</b><ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-600);">
+          ${l.segments.map(s=>`<li><a href="${escapeHtml(buildYoutubeLink(l.url, s.seconds))}" target="_blank" rel="noopener">${formatSecondsAsTime(s.seconds)}</a> — ${escapeHtml(s.label)}</li>`).join('')}
+        </ul></div>`:'<p class="hint" style="margin-top:10px;">No timestamped segments added — the AI Doubt Solver will link to the start of the video for this lecture.</p>'}
+        <div class="hint" style="margin-top:6px;">Transcript: ${l.transcript?'available':'not added yet — the Doubt Solver uses objectives, notes and description instead.'}</div>
       </div>`:''}
     </div>`;
   }).join('');
@@ -1310,6 +1359,7 @@ function renderLectureList(){
 
 PAGE_INIT.lectures = function(){
   const canEdit = isTeacherOrAdmin();
+  LectureSegmentsDraft = [];
 
   ['lec-filter-board','lec-filter-class','lec-filter-subject','lec-filter-chapter','lec-filter-topic'].forEach(id=>{
     const el = $('#'+id); if(!el) return;
@@ -1343,6 +1393,8 @@ PAGE_INIT.lectures = function(){
       form.medium.value=l.medium; form.language.value=l.language;
       form.objectives.value=l.objectives||''; form.referenceNotes.value=l.referenceNotes||'';
       form.id.value=l.id;
+      LectureSegmentsDraft = (l.segments||[]).map(s=>({...s}));
+      renderLectureSegmentsList();
       renderLecturePreview(l.url);
       $('#lec-form-title').textContent='Edit Lecture';
       $('#lec-cancel-edit').style.display='inline-flex';
@@ -1372,8 +1424,26 @@ PAGE_INIT.lectures = function(){
   });
   $('#lec-cancel-edit').addEventListener('click', function(){
     form.reset(); form.id.value=''; lectureSubjectRefresh(form); $('#lec-preview').innerHTML='';
+    LectureSegmentsDraft = []; renderLectureSegmentsList();
     $('#lec-form-title').textContent='Add Lecture'; this.style.display='none';
   });
+  $('#lec-segment-add').addEventListener('click', function(){
+    const label = $('#lec-segment-label').value.trim();
+    const seconds = parseTimeToSeconds($('#lec-segment-time').value);
+    if(!label){ toast('Enter a label for this segment.','error'); return; }
+    if(seconds==null){ toast('Enter a valid time as mm:ss (e.g. 2:45).','error'); return; }
+    LectureSegmentsDraft.push({label, seconds});
+    LectureSegmentsDraft.sort((a,b)=>a.seconds-b.seconds);
+    $('#lec-segment-label').value=''; $('#lec-segment-time').value='';
+    renderLectureSegmentsList();
+  });
+  $('#lec-segments-list').addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action="lec-segment-remove"]'); if(!btn) return;
+    LectureSegmentsDraft.splice(Number(btn.dataset.idx),1);
+    renderLectureSegmentsList();
+  });
+  renderLectureSegmentsList();
+
   form.addEventListener('submit', function(e){
     e.preventDefault();
     const fieldWrap = form.url.closest('.field');
@@ -1381,17 +1451,19 @@ PAGE_INIT.lectures = function(){
     fieldWrap.classList.remove('has-error');
     const fd = new FormData(form);
     const data = Object.fromEntries(fd.entries());
+    data.segments = LectureSegmentsDraft.map(s=>({...s}));
     let lectures = load(SK.lectures, []);
     if(data.id){
       lectures = lectures.map(x=>x.id===data.id?{...x,...data}:x);
       toast('Lecture updated.','success');
     } else {
-      data.id = uid('lec'); data.createdAt = new Date().toISOString(); data.transcript=''; data.segments=[];
+      data.id = uid('lec'); data.createdAt = new Date().toISOString(); data.transcript='';
       lectures.push(data);
       toast('Lecture added.','success');
     }
     save(SK.lectures, lectures);
     form.reset(); form.id.value=''; lectureSubjectRefresh(form); $('#lec-preview').innerHTML='';
+    LectureSegmentsDraft = []; renderLectureSegmentsList();
     $('#lec-form-title').textContent='Add Lecture'; $('#lec-cancel-edit').style.display='none';
     renderLectureFilters(); renderLectureList();
   });
@@ -3059,7 +3131,26 @@ PAGE_INIT.performance = function(){
 };
 
 /* ========================================================================
-   AI DOUBT SOLVER (demo canned responses)
+   AI DOUBT SOLVER (Phase 7)
+
+   Grounding rule: an answer is only ever built from the selected lecture's
+   own transcript, reference notes, description and objectives (plus
+   matching Curriculum entries) -- never invented, and never from the
+   YouTube URL alone. If that content is missing, the student is told so
+   directly rather than receiving a guess (req 10/11).
+
+   Like AIEvaluationService (Phase 5), AIDoubtService makes a REAL fetch()
+   to a backend URL configured on Settings. With nothing configured, or on
+   failure, this falls back to the original Phase 1 keyword-matched demo
+   answer -- but it is always labelled "Demo sample" and, once a lecture is
+   selected, still carries an honest citation to that lecture so the
+   fallback is never mistaken for a grounded answer.
+
+   Timestamps: a backend may point to one of the lecture's own
+   teacher-authored segments (by index) as a verified citation. Absent
+   that, a simple client-side keyword match against segment labels offers
+   a best-guess jump point, always labelled "unverified match" -- per req
+   9, an unverifiable timestamp is never presented as reliable.
 ======================================================================== */
 const DOUBT_SAMPLES = {
   English: [
@@ -3078,9 +3169,9 @@ const DOUBT_SAMPLES = {
   ],
 };
 const DOUBT_FALLBACK = {
-  English:'This is a demo response. In the full product, this would be answered by an AI model trained on your selected board, class and chapter.',
-  Hindi:'यह एक डेमो उत्तर है। पूर्ण उत्पाद में, यह आपके चयनित बोर्ड, कक्षा और अध्याय के आधार पर AI मॉडल द्वारा उत्तरित किया जाएगा।',
-  Kannada:'ಇದು ಡೆಮೊ ಪ್ರತಿಕ್ರಿಯೆ. ಪೂರ್ಣ ಉತ್ಪನ್ನದಲ್ಲಿ, ಇದನ್ನು ನಿಮ್ಮ ಆಯ್ಕೆಮಾಡಿದ ಬೋರ್ಡ್, ತರಗತಿ ಮತ್ತು ಅಧ್ಯಾಯದ ಆಧಾರದ ಮೇಲೆ AI ಮಾದರಿಯಿಂದ ಉತ್ತರಿಸಲಾಗುತ್ತದೆ.',
+  English:'This is a demo response, not grounded in any specific lecture. In the full product, this would be answered by a real AI model using your selected lecture\'s content.',
+  Hindi:'यह एक डेमो उत्तर है, किसी विशेष लेक्चर पर आधारित नहीं। पूर्ण उत्पाद में, यह आपके चयनित लेक्चर की सामग्री का उपयोग करके एक वास्तविक AI मॉडल द्वारा उत्तरित किया जाएगा।',
+  Kannada:'ಇದು ಡೆಮೊ ಪ್ರತಿಕ್ರಿಯೆ, ಯಾವುದೇ ನಿರ್ದಿಷ್ಟ ಉಪನ್ಯಾಸವನ್ನು ಆಧರಿಸಿಲ್ಲ. ಪೂರ್ಣ ಉತ್ಪನ್ನದಲ್ಲಿ, ಇದನ್ನು ನಿಮ್ಮ ಆಯ್ಕೆಮಾಡಿದ ಉಪನ್ಯಾಸದ ವಿಷಯವನ್ನು ಬಳಸಿಕೊಂಡು ನಿಜವಾದ AI ಮಾದರಿಯಿಂದ ಉತ್ತರಿಸಲಾಗುತ್ತದೆ.',
 };
 function getDoubtResponse(text, lang){
   const samples = DOUBT_SAMPLES[lang] || DOUBT_SAMPLES.English;
@@ -3089,17 +3180,102 @@ function getDoubtResponse(text, lang){
   return hit ? hit.a : (DOUBT_FALLBACK[lang] || DOUBT_FALLBACK.English);
 }
 
+/* Basic, generic client-side keyword filter -- a real deployment needs
+   proper content moderation on the backend; this is only a first, honest
+   line of defence suitable for a demo school environment (req 13). */
+const UNSAFE_PATTERNS = [
+  /\b(kill|suicide|self[\s-]?harm|self[\s-]?injur\w*)\b/i,
+  /\b(weapon|bomb|explosive)\b/i,
+  /\b(sex\w*|porn\w*)\b/i,
+  /\b(drugs?|narcotic)\b/i,
+  /\b(hate|racis\w*|terroris\w*)\b/i,
+];
+function isQuestionSafe(text){ return !UNSAFE_PATTERNS.some(p=>p.test(text)); }
+
+const DoubtState = { board:'karnataka', class:'5', subject:'', lectureId:'' };
+
+function chatKey(lectureId, lang){ return SK.chat+(lectureId||'general')+'_'+lang; }
+
+const AIDoubtService = {
+  isConfigured(){ return !!(load(SK.doubtBackendUrl,'')||'').trim(); },
+  async ask(payload){
+    const endpoint = (load(SK.doubtBackendUrl,'')||'').trim();
+    if(!endpoint) return {ok:false, errorCode:'NOT_CONFIGURED', message:'No AI doubt-solving backend is configured.'};
+    try{
+      const res = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+      if(!res.ok){
+        const text = await res.text().catch(()=>'');
+        return {ok:false, errorCode:'BACKEND_ERROR', message:`Doubt-solving backend returned HTTP ${res.status}.${text?' '+text:''}`};
+      }
+      const data = await res.json();
+      return {ok:true, data};
+    } catch(err){
+      return {ok:false, errorCode:'NETWORK_ERROR', message:'Could not reach the doubt-solving backend: '+(err&&err.message?err.message:'unknown error')};
+    }
+  },
+};
+
+/* Simple keyword-overlap heuristic between the question and each segment's
+   label. Always an unverified best guess -- never presented as reliable. */
+function findRelevantSegment(lecture, questionText){
+  if(!lecture || !lecture.segments || !lecture.segments.length) return null;
+  const qWords = new Set((questionText||'').toLowerCase().split(/\W+/).filter(w=>w.length>2));
+  let best = null, bestScore = 0;
+  lecture.segments.forEach(seg=>{
+    const segWords = (seg.label||'').toLowerCase().split(/\W+/).filter(w=>w.length>2);
+    const score = segWords.filter(w=>qWords.has(w)).length;
+    if(score>bestScore){ bestScore = score; best = seg; }
+  });
+  return bestScore>0 ? best : null;
+}
+function resolveCitation(lecture, backendCitation, questionText){
+  if(!lecture) return null;
+  if(backendCitation && backendCitation.segmentIndex!=null && lecture.segments && lecture.segments[backendCitation.segmentIndex]){
+    return {lecture, segment:lecture.segments[backendCitation.segmentIndex], verified:!!backendCitation.verified};
+  }
+  return {lecture, segment:findRelevantSegment(lecture, questionText), verified:false};
+}
+function renderCitationBlock(citation){
+  if(!citation || !citation.lecture) return '';
+  const l = citation.lecture, seg = citation.segment;
+  const link = seg
+    ? `<a href="${escapeHtml(buildYoutubeLink(l.url, seg.seconds))}" target="_blank" rel="noopener" class="btn btn-sm" style="margin-top:6px;display:inline-flex;">${ico('link')} Jump to ${formatSecondsAsTime(seg.seconds)}${citation.verified?'':' (unverified match)'}</a>`
+    : `<a href="${escapeHtml(buildYoutubeLink(l.url))}" target="_blank" rel="noopener" class="btn btn-sm" style="margin-top:6px;display:inline-flex;">${ico('link')} Open full lecture</a>`;
+  return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.25);font-size:11.5px;">
+    Source: ${escapeHtml(l.title)} (${boardLabel(l.board)}, Class ${l.class}, ${escapeHtml(l.subject)} &middot; ${escapeHtml(l.chapter)})
+    ${!seg?'<div>Exact timestamp not available for this question — opening the full lecture instead.</div>':''}
+    <div>${link}</div>
+  </div>`;
+}
+
 VIEWS.doubt = function(){
   return `
     <div class="section-title">AI Doubt Solver</div>
-    <div class="section-sub">Ask a question and get a response in English, Hindi or Kannada.</div>
-    <div class="info-banner">${ico('doubt')}<div>All responses in this demo are <b>predefined sample answers</b>, clearly for illustration — no live AI model is connected.</div></div>
+    <div class="section-sub">Select your board, class, subject and lecture, then ask a question grounded in that lecture's content.</div>
+    <div class="info-banner">${ico('doubt')}<div>When an AI backend is configured (Settings), answers are grounded in the selected lecture's own content. Without one, you'll get a clearly-labelled <b>demo sample response</b> instead — never a fabricated "real" answer.</div></div>
+
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Choose a Lecture</h3></div>
+      <div class="field-row">
+        <div class="field"><label>Board</label><select id="doubt-board">${boardOptions(DoubtState.board)}</select></div>
+        <div class="field"><label>Class</label><select id="doubt-class">${classOptions(DoubtState.class)}</select></div>
+        <div class="field"><label>Subject</label><select id="doubt-subject"></select></div>
+        <div class="field"><label>Lecture</label><select id="doubt-lecture"><option value="">Select a lecture...</option></select></div>
+      </div>
+      <div id="doubt-lecture-status"></div>
+    </div>
+
     <div class="chat-wrap">
       <div class="chat-head">
-        <b>Demo Doubt Chat</b>
+        <b>Doubt Chat</b>
         <select id="chat-lang">${languageOptions(State.chatLang)}</select>
       </div>
       <div class="chat-messages" id="chat-messages"></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;padding:10px 12px 0;">
+        <button type="button" class="btn btn-sm" data-quick="simpler">Explain more simply</button>
+        <button type="button" class="btn btn-sm" data-quick="example">Worked example</button>
+        <button type="button" class="btn btn-sm" data-quick="steps">Step-by-step solution</button>
+      </div>
       <form class="chat-input-row" id="chat-form">
         <input type="text" id="chat-input" placeholder="Type your doubt, e.g. 'How do I add fractions?'" required>
         <button type="submit" class="btn btn-primary">Send</button>
@@ -3107,28 +3283,115 @@ VIEWS.doubt = function(){
     </div>`;
 };
 
-function chatKey(lang){ return SK.chat+lang; }
+function refreshDoubtSubjectOptions(){
+  const sel = $('#doubt-subject'); if(!sel) return;
+  sel.innerHTML = subjectOptions(DoubtState.board, DoubtState.class, DoubtState.subject);
+  DoubtState.subject = sel.value;
+}
+function refreshDoubtLectureOptions(){
+  const sel = $('#doubt-lecture'); if(!sel) return;
+  const lectures = load(SK.lectures, []).filter(l=>l.board===DoubtState.board && String(l.class)===String(DoubtState.class) && l.subject===DoubtState.subject);
+  sel.innerHTML = '<option value="">Select a lecture...</option>' + lectures.map(l=>`<option value="${l.id}" ${l.id===DoubtState.lectureId?'selected':''}>${escapeHtml(l.title)} — ${escapeHtml(l.chapter)}</option>`).join('');
+  if(!lectures.find(l=>l.id===DoubtState.lectureId)) DoubtState.lectureId = '';
+  renderDoubtLectureStatus();
+}
+function renderDoubtLectureStatus(){
+  const box = $('#doubt-lecture-status'); if(!box) return;
+  if(!DoubtState.lectureId){ box.innerHTML = '<p class="hint" style="margin-top:8px;">No lecture selected — you can still ask a general question, but the answer won\'t be grounded in specific lecture content.</p>'; return; }
+  const lecture = load(SK.lectures, []).find(l=>l.id===DoubtState.lectureId);
+  if(!lecture){ box.innerHTML=''; return; }
+  const sources = getLectureContentSources(lecture);
+  box.innerHTML = `<div class="info-banner" style="margin-top:10px;margin-bottom:0;">${ico('shield')}<div>Grounding content for "<b>${escapeHtml(lecture.title)}</b>": ${sources.sufficient ? 'available (from its objectives, notes, description or transcript).' : '<b>not enough yet</b> — add objectives, notes or a description to this lecture on the Lectures page, or choose a different one.'}</div></div>`;
+}
+
 function renderChatMessages(){
   const box = $('#chat-messages'); if(!box) return;
-  const history = load(chatKey(State.chatLang), []);
-  box.innerHTML = history.length ? history.map(m=>`
-    <div class="msg ${m.from}">${m.from==='bot'?'<span class="msg-tag">Demo AI</span>':''}${escapeHtml(m.text)}</div>`).join('')
-    : `<div class="empty-state">${ico('doubt')}<h4>Ask your first question</h4><p>Try: "How do I add fractions?"</p></div>`;
+  const history = load(chatKey(DoubtState.lectureId, State.chatLang), []);
+  box.innerHTML = history.length ? history.map(m=>{
+    if(m.from==='user') return `<div class="msg user">${escapeHtml(m.text)}</div>`;
+    return `<div class="msg bot"><span class="msg-tag">${m.demo?'Demo sample':'AI response'}</span>${escapeHtml(m.text)}${renderCitationBlock(m.citation)}</div>`;
+  }).join('') : `<div class="empty-state">${ico('doubt')}<h4>Ask your first question</h4><p>Try: "How do I add fractions?"</p></div>`;
   box.scrollTop = box.scrollHeight;
 }
+
 PAGE_INIT.doubt = function(){
+  $('#doubt-board').value = DoubtState.board;
+  refreshDoubtSubjectOptions();
+  $('#doubt-class').value = DoubtState.class;
+  refreshDoubtLectureOptions();
+
+  $('#doubt-board').addEventListener('change', function(){ DoubtState.board=this.value; DoubtState.subject=''; refreshDoubtSubjectOptions(); DoubtState.lectureId=''; refreshDoubtLectureOptions(); renderChatMessages(); });
+  $('#doubt-class').addEventListener('change', function(){ DoubtState.class=this.value; refreshDoubtSubjectOptions(); DoubtState.lectureId=''; refreshDoubtLectureOptions(); renderChatMessages(); });
+  $('#doubt-subject').addEventListener('change', function(){ DoubtState.subject=this.value; DoubtState.lectureId=''; refreshDoubtLectureOptions(); renderChatMessages(); });
+  $('#doubt-lecture').addEventListener('change', function(){ DoubtState.lectureId=this.value; renderDoubtLectureStatus(); renderChatMessages(); });
+
   renderChatMessages();
   $('#chat-lang').addEventListener('change', function(){ State.chatLang = this.value; renderChatMessages(); });
-  $('#chat-form').addEventListener('submit', function(e){
+
+  $$('[data-quick]').forEach(btn=>{
+    btn.addEventListener('click', function(){
+      const phrases = {simpler:'Can you explain that more simply?', example:'Can you give me a worked example?', steps:'Can you show me a step-by-step solution?'};
+      const input = $('#chat-input');
+      input.value = (input.value ? input.value+' ' : '') + phrases[this.dataset.quick];
+      input.focus();
+    });
+  });
+
+  $('#chat-form').addEventListener('submit', async function(e){
     e.preventDefault();
     const input = $('#chat-input');
     const text = input.value.trim(); if(!text) return;
-    const history = load(chatKey(State.chatLang), []);
+    const lectureId = DoubtState.lectureId, lang = State.chatLang;
+    const key = chatKey(lectureId, lang);
+    const history = load(key, []);
     history.push({from:'user', text});
-    history.push({from:'bot', text:getDoubtResponse(text, State.chatLang)});
-    save(chatKey(State.chatLang), history);
+    save(key, history);
     input.value = '';
     renderChatMessages();
+
+    const pushBot = (entry)=>{ const h = load(key, []); h.push({from:'bot', ...entry}); save(key, h); renderChatMessages(); };
+
+    if(!isQuestionSafe(text)){
+      pushBot({text:"Let's keep questions focused on your schoolwork. Please rephrase, or ask your teacher for help with this.", demo:true, citation:null});
+      return;
+    }
+
+    const lecture = lectureId ? load(SK.lectures, []).find(l=>l.id===lectureId) : null;
+
+    if(!lecture){
+      pushBot({text:getDoubtResponse(text, lang), demo:true, citation:null});
+      return;
+    }
+
+    const sources = getLectureContentSources(lecture);
+    if(!sources.sufficient){
+      pushBot({text:`This lecture doesn't have enough content yet to answer confidently — it has no transcript, reference notes, description or objectives added. Please choose a different lecture, or ask your teacher to add more detail to "${lecture.title}".`, demo:true, citation:null});
+      return;
+    }
+
+    if(AIDoubtService.isConfigured()){
+      const band = getClassBand(lecture.class);
+      const payload = {
+        board:lecture.board, class:lecture.class, subject:lecture.subject, chapter:lecture.chapter, topic:lecture.topic,
+        lectureId:lecture.id, lectureTitle:lecture.title, language:lang,
+        expectedLevel:{label:band.label, style:band.style, answerLength:band.answerLength},
+        groundingSources:{transcript:lecture.transcript||'', referenceNotes:lecture.referenceNotes||'', description:lecture.description||'', objectives:lecture.objectives||''},
+        curriculumContext: load(SK.curriculum, []).filter(e=>e.board===lecture.board && String(e.class)===String(lecture.class) && e.subject===lecture.subject),
+        segments: lecture.segments||[],
+        conversationHistory: history.slice(-6).map(m=>({from:m.from, text:m.text})),
+        question:text,
+      };
+      const result = await AIDoubtService.ask(payload);
+      if(result.ok && result.data && result.data.answer){
+        pushBot({text:result.data.answer, demo:false, citation:resolveCitation(lecture, result.data.citation, text)});
+        return;
+      }
+      const reason = result.ok ? 'the backend did not return a usable answer' : result.message;
+      pushBot({text:`The AI backend could not answer this (${reason}). Here is a demo sample response instead — it is not grounded in "${lecture.title}":\n\n${getDoubtResponse(text, lang)}`, demo:true, citation:resolveCitation(lecture, null, text)});
+      return;
+    }
+
+    pushBot({text:getDoubtResponse(text, lang), demo:true, citation:resolveCitation(lecture, null, text)});
   });
 };
 
@@ -3274,11 +3537,22 @@ VIEWS.settings = function(){
     </div>
 
     <div class="card" style="margin-top:20px;">
+      <div class="card-head"><h3>AI Doubt Solver Backend <span class="demo-label">Phase 7</span></h3></div>
+      <p class="hint" style="margin-bottom:12px;">Real, lecture-grounded AI answers (in English, Hindi or Kannada) also require a backend server you control, holding your own AI provider credentials — this demo never stores or sends any API key from the browser. Without one configured, the Doubt Solver falls back to a clearly-labelled demo sample response. See <code>DOUBT_SOLVER_BACKEND.md</code> for the exact request/response contract and safeguards required for a school environment.</p>
+      <div class="field">
+        <label>Doubt Solver Backend URL</label>
+        <input type="url" id="settings-doubt-endpoint" placeholder="https://your-backend.example.com/api/ai/doubt-solver" value="${escapeHtml(load(SK.doubtBackendUrl,''))}">
+      </div>
+      <p class="hint" id="settings-doubt-status" style="margin-bottom:12px;"></p>
+      <button class="btn btn-primary" id="settings-doubt-save">Save Backend URL</button>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
       <div class="card-head"><h3>Limitations</h3></div>
       <ul style="margin:0;padding-left:18px;color:var(--text-600);font-size:13px;line-height:1.8;">
         <li>Role switching is a demo selector, not secure authentication.</li>
         <li>All lectures, assignments, submissions, scores and feedback are sample or manually entered demo data.</li>
-        <li>The AI Doubt Solver returns predefined sample answers, not live AI output.</li>
+        <li>The AI Doubt Solver (Phase 7) only gives real, lecture-grounded answers when you configure a backend below; without one, it falls back to a clearly-labelled demo sample response, never a fabricated "real" one.</li>
         <li>Curriculum chapters and topics are illustrative and have not been verified against official syllabi.</li>
         <li>Image uploads are previewed locally in the browser only and are never stored or transmitted, unless you configure a real evaluation backend above.</li>
         <li>AI evaluation of handwritten submissions (Phase 5) only runs against a backend you configure and deploy yourself; without one, evaluation attempts fail honestly rather than producing fabricated results.</li>
@@ -3324,6 +3598,19 @@ PAGE_INIT.settings = function(){
     save(SK.evalBackendUrl, val);
     refreshEvalStatus();
     toast(val?'Evaluation backend URL saved.':'Evaluation backend cleared.','success');
+  });
+
+  const doubtStatusEl = $('#settings-doubt-status');
+  const refreshDoubtBackendStatus = ()=>{
+    const url = load(SK.doubtBackendUrl,'');
+    doubtStatusEl.textContent = url ? `Configured: ${url}` : 'Not configured — the Doubt Solver will use a clearly-labelled demo response instead.';
+  };
+  refreshDoubtBackendStatus();
+  $('#settings-doubt-save').addEventListener('click', function(){
+    const val = $('#settings-doubt-endpoint').value.trim();
+    save(SK.doubtBackendUrl, val);
+    refreshDoubtBackendStatus();
+    toast(val?'Doubt Solver backend URL saved.':'Doubt Solver backend cleared.','success');
   });
 };
 
