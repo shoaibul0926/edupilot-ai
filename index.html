@@ -739,7 +739,6 @@ const ROUTES = [
   {key:'generator', label:'Assignment Generator', icon:'generator'},
   {key:'submissions', label:'Student Submissions', icon:'submissions'},
   {key:'performance', label:'Performance & Feedback', icon:'performance'},
-  {key:'doubt', label:'AI Doubt Solver', icon:'doubt'},
   {key:'library', label:'Reference Library', icon:'library'},
   {key:'settings', label:'Settings', icon:'settings'},
 ];
@@ -3778,22 +3777,10 @@ VIEWS.settings = function(){
     </div>
 
     <div class="card" style="margin-top:20px;">
-      <div class="card-head"><h3>AI Doubt Solver Backend <span class="demo-label">Phase 7</span></h3></div>
-      <p class="hint" style="margin-bottom:12px;">Real, lecture-grounded AI answers (in English, Hindi or Kannada) also require a backend server you control, holding your own AI provider credentials — this demo never stores or sends any API key from the browser. Without one configured, the Doubt Solver falls back to a clearly-labelled demo sample response. See <code>DOUBT_SOLVER_BACKEND.md</code> for the exact request/response contract and safeguards required for a school environment.</p>
-      <div class="field">
-        <label>Doubt Solver Backend URL</label>
-        <input type="url" id="settings-doubt-endpoint" placeholder="https://your-backend.example.com/api/ai/doubt-solver" value="${escapeHtml(load(SK.doubtBackendUrl,''))}">
-      </div>
-      <p class="hint" id="settings-doubt-status" style="margin-bottom:12px;"></p>
-      <button class="btn btn-primary" id="settings-doubt-save">Save Backend URL</button>
-    </div>
-
-    <div class="card" style="margin-top:20px;">
       <div class="card-head"><h3>Limitations</h3></div>
       <ul style="margin:0;padding-left:18px;color:var(--text-600);font-size:13px;line-height:1.8;">
         <li>Role switching is a demo selector, not secure authentication.</li>
         <li>All lectures, assignments, submissions, scores and feedback are sample or manually entered demo data.</li>
-        <li>The AI Doubt Solver (Phase 7) only gives real, lecture-grounded answers when you configure a backend below; without one, it falls back to a clearly-labelled demo sample response, never a fabricated "real" one.</li>
         <li>Curriculum chapters and topics are illustrative and have not been verified against official syllabi.</li>
         <li>Image uploads are previewed locally in the browser only and are never stored or transmitted, unless you configure a real evaluation backend above.</li>
         <li>AI evaluation of handwritten submissions (Phase 5) only runs against a backend you configure and deploy yourself; without one, evaluation attempts fail honestly rather than producing fabricated results.</li>
@@ -3841,18 +3828,6 @@ PAGE_INIT.settings = function(){
     toast(val?'Evaluation backend URL saved.':'Evaluation backend cleared.','success');
   });
 
-  const doubtStatusEl = $('#settings-doubt-status');
-  const refreshDoubtBackendStatus = ()=>{
-    const url = load(SK.doubtBackendUrl,'');
-    doubtStatusEl.textContent = url ? `Configured: ${url}` : 'Not configured — the Doubt Solver will use a clearly-labelled demo response instead.';
-  };
-  refreshDoubtBackendStatus();
-  $('#settings-doubt-save').addEventListener('click', function(){
-    const val = $('#settings-doubt-endpoint').value.trim();
-    save(SK.doubtBackendUrl, val);
-    refreshDoubtBackendStatus();
-    toast(val?'Doubt Solver backend URL saved.':'Doubt Solver backend cleared.','success');
-  });
 };
 
 /* ========================================================================
