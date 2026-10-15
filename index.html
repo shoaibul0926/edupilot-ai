@@ -541,6 +541,7 @@ const SK = {
   evalBackendUrl:'edupilot_evalBackendUrl',
   studentFeedback:'edupilot_studentFeedback',
   doubtBackendUrl:'edupilot_doubtBackendUrl',
+  assignGenBackendUrl:'edupilot_assignGenBackendUrl',
 };
 function load(key, fallback){
   try{
@@ -1701,17 +1702,70 @@ PAGE_INIT.assignments = function(){
    - Every question stores its source lecture, chapter, topic, board and
      class, so provenance is always visible and auditable.
 
-   AIService is written as the seam a real backend would sit behind: in
-   production, generateAssignmentQuestions() would POST to a server endpoint
-   (e.g. /api/ai/generate-assignment) that holds the AI provider's API key
-   server-side. This frontend-only demo never stores or sends any API key —
-   it returns a deterministic, template-based mock and labels it as such
-   everywhere in the UI.
+   AIService is the seam a real backend sits behind (Phase 9): if an
+   Assignment Generator Backend URL is configured on Settings, it makes a
+   REAL fetch() there first — see ASSIGNMENT_GENERATOR_BACKEND.md for the
+   contract. This frontend never stores or sends any API key itself; a
+   configured backend holds that server-side (see server/README.md for the
+   reference implementation). If no backend is configured, or the call
+   fails, this falls back to the original deterministic, template-based
+   mock below — never a fabricated "real AI" result — and always labels
+   which path produced a given assignment (`generatedBy`).
 ======================================================================== */
+const AIAssignmentGenService = {
+  isConfigured(){ return !!(load(SK.assignGenBackendUrl,'')||'').trim(); },
+  async generate(lecture, config, band, sources){
+    const endpoint = (load(SK.assignGenBackendUrl,'')||'').trim();
+    if(!endpoint) return {ok:false, errorCode:'NOT_CONFIGURED', message:'No assignment generator backend is configured.'};
+    try{
+      const res = await fetch(endpoint, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          topic:lecture.topic, chapter:lecture.chapter, board:lecture.board, class:lecture.class, subject:lecture.subject,
+          expectedLevel:{label:band.label, style:band.style, answerLength:band.answerLength},
+          groundingSources:{objectives:sources.objectives.join('\n'), referenceNotes:sources.notes, description:sources.description, transcript:sources.transcript},
+          config,
+        }),
+      });
+      if(!res.ok){
+        const text = await res.text().catch(()=>'');
+        return {ok:false, errorCode:'BACKEND_ERROR', message:`Generator backend returned HTTP ${res.status}.${text?' '+text:''}`};
+      }
+      const data = await res.json();
+      if(!data || !Array.isArray(data.questions)) return {ok:false, errorCode:'BACKEND_ERROR', message:'Generator backend response did not include a questions array.'};
+      return {ok:true, questions:data.questions};
+    } catch(err){
+      return {ok:false, errorCode:'NETWORK_ERROR', message:'Could not reach the assignment generator backend: '+(err&&err.message?err.message:'unknown error')};
+    }
+  },
+};
+
 const AIService = {
-  generateAssignmentQuestions(lecture, config){
+  async generateAssignmentQuestions(lecture, config){
+    const sources = getLectureContentSources(lecture);
+    if(!sources.sufficient) return {ok:false, reason:'insufficient_content'};
+
+    if(AIAssignmentGenService.isConfigured()){
+      const band = getClassBand(lecture.class);
+      const real = await AIAssignmentGenService.generate(lecture, config, band, sources);
+      if(real.ok){
+        const questions = real.questions.map(q=>({
+          id:uid('q'), type:q.type, text:q.text, options:q.options||null, correctIndex:q.correctIndex!=null?q.correctIndex:null,
+          suggestedAnswer:q.suggestedAnswer, markingScheme:q.markingScheme, topicTag:q.topicTag||lecture.topic,
+          difficulty:q.difficulty||'medium', marks:q.marks||band.marks[q.type]||1,
+          sourceLectureId:lecture.id, sourceChapter:lecture.chapter, sourceTopic:lecture.topic, sourceBoard:lecture.board, sourceClass:lecture.class, sourceSubject:lecture.subject,
+          generatedFrom:'real-backend',
+        }));
+        return {
+          ok:true, questions,
+          contentSources:{usedTranscript:sources.hasTranscript, usedNotes:sources.hasNotes, usedObjectives:sources.hasObjectives, usedDescription:sources.hasDescription},
+          generatedBy:'real-backend',
+        };
+      }
+      toast(`Generator backend unavailable (${real.errorCode}) — used the built-in demo generator instead.`,'error');
+    }
     return new Promise(resolve=>{
-      setTimeout(()=>resolve(mockGenerateQuestions(lecture, config)), 500);
+      setTimeout(()=>resolve({...mockGenerateQuestions(lecture, config), generatedBy:'demo-mock-ai'}), 500);
     });
   },
 };
@@ -1910,9 +1964,11 @@ VIEWS.generator = function(){
       <div class="info-banner">${ico('shield')}<div>This tool is available to teachers and administrators.</div></div>`;
   }
   const lectures = load(SK.lectures, []);
+  const genConfigured = AIAssignmentGenService.isConfigured();
   return `
-    <div class="section-title">Assignment Generator <span class="demo-label">Demo mock AI</span></div>
+    <div class="section-title">Assignment Generator <span class="demo-label">${genConfigured?'Real AI backend configured':'Demo mock AI'}</span></div>
     <div class="section-sub">Generate a draft assignment from a lecture's own content — objectives, reference notes, description or transcript. The YouTube link itself is never used as content.</div>
+    ${genConfigured?'':`<div class="info-banner">${ico('shield')}<div>No Assignment Generator Backend is configured (Settings) — questions below are produced by a deterministic, template-based demo generator, not a live AI model. See <code>ASSIGNMENT_GENERATOR_BACKEND.md</code>.</div></div>`}
 
     <div class="card" style="margin-bottom:20px;">
       <div class="card-head"><h3>Step 1 — Select a Lecture</h3></div>
@@ -1984,7 +2040,7 @@ function renderGenConfigCard(lecture, sufficient){
       ${isMath?`<p class="hint" style="margin-bottom:12px;">Numeric problems are computed arithmetic practice (e.g. addition, fractions, data handling) related to this lecture's topic — the numbers are generated, and the answer is calculated directly, not drawn from lecture text.</p>`:''}
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <b id="gen-total-marks-preview"></b>
-        <button type="button" class="btn btn-primary" id="gen-generate-btn">${ico('plus')} Generate Assignment (Demo)</button>
+        <button type="button" class="btn btn-primary" id="gen-generate-btn">${ico('plus')} Generate Assignment${AIAssignmentGenService.isConfigured()?'':' (Demo)'}</button>
       </div>
     </div>`;
   const updatePreview = ()=>{
@@ -2018,9 +2074,10 @@ async function handleGenerateAssignment(lecture, band, allowLong, isMath){
   };
   if(config.mcqCount+config.shortCount+config.longCount+config.sumCount<=0){ toast('Choose at least one question to generate.','error'); return; }
 
-  btn.disabled = true; btn.textContent = 'Generating demo questions...';
+  const usingRealBackend = AIAssignmentGenService.isConfigured();
+  btn.disabled = true; btn.textContent = usingRealBackend ? 'Generating questions...' : 'Generating demo questions...';
   const result = await AIService.generateAssignmentQuestions(lecture, config);
-  btn.disabled = false; btn.innerHTML = `${ico('plus')} Generate Assignment (Demo)`;
+  btn.disabled = false; btn.innerHTML = `${ico('plus')} Generate Assignment${usingRealBackend?'':' (Demo)'}`;
 
   if(!result.ok){ toast('Not enough lecture content to generate questions from.','error'); return; }
   result.questions.forEach(q=>{ q.marks = config.marksOverride[q.type] ?? q.marks; });
@@ -2029,7 +2086,7 @@ async function handleGenerateAssignment(lecture, band, allowLong, isMath){
     id:uid('genasg'), lectureId:lecture.id, title:lecture.title+' — Assignment',
     board:lecture.board, class:lecture.class, subject:lecture.subject, chapter:lecture.chapter, topic:lecture.topic, year:lecture.year||DEFAULT_ACADEMIC_YEAR,
     config, questions:result.questions, contentSources:result.contentSources,
-    status:'Draft', linkedAssignmentId:null, dueDate:daysFromNow(7), generatedBy:'demo-mock-ai',
+    status:'Draft', linkedAssignmentId:null, dueDate:daysFromNow(7), generatedBy:result.generatedBy||'demo-mock-ai',
     createdAt:new Date().toISOString(), updatedAt:new Date().toISOString(),
   };
   const all = load(SK.generatedAssignments, []);
@@ -2204,7 +2261,7 @@ function wireGenDraftCard(assignmentId){
   });
 
   $('#gen-regenerate').addEventListener('click', function(){
-    confirmAction('Regenerate questions?','This replaces all current questions in this draft with a new demo-generated set using the same configuration. Manual edits will be lost.', async ()=>{
+    confirmAction('Regenerate questions?',`This replaces all current questions in this draft with a new ${AIAssignmentGenService.isConfigured()?'AI-generated':'demo-generated'} set using the same configuration. Manual edits will be lost.`, async ()=>{
       const all = load(SK.generatedAssignments, []);
       const rec = all.find(x=>x.id===assignmentId); if(!rec) return;
       const lecture = load(SK.lectures, []).find(l=>l.id===rec.lectureId);
@@ -2212,7 +2269,7 @@ function wireGenDraftCard(assignmentId){
       const result = await AIService.generateAssignmentQuestions(lecture, rec.config);
       if(!result.ok){ toast('Not enough lecture content to regenerate.','error'); return; }
       result.questions.forEach(q=>{ q.marks = rec.config.marksOverride[q.type] ?? q.marks; });
-      rec.questions = result.questions; rec.contentSources = result.contentSources; rec.updatedAt = new Date().toISOString();
+      rec.questions = result.questions; rec.contentSources = result.contentSources; rec.generatedBy = result.generatedBy||'demo-mock-ai'; rec.updatedAt = new Date().toISOString();
       save(SK.generatedAssignments, all);
       toast('Questions regenerated.','success');
       renderGenDraftCard(); renderGenList();
@@ -4249,6 +4306,17 @@ VIEWS.settings = function(){
     </div>
 
     <div class="card" style="margin-top:20px;">
+      <div class="card-head"><h3>Assignment Generator Backend <span class="demo-label">Phase 9</span></h3></div>
+      <p class="hint" style="margin-bottom:12px;">Real AI-generated questions, grounded only in a lecture's own objectives/notes/description/transcript, require a backend server you control, holding your own language-model provider credentials — this demo never stores or sends any API key from the browser. Point this at your backend's endpoint once you have one running; see <code>ASSIGNMENT_GENERATOR_BACKEND.md</code> in the project for the exact request/response contract and security requirements. Leaving this blank keeps the built-in demo generator as the only mode.</p>
+      <div class="field">
+        <label>Assignment Generator Backend URL</label>
+        <input type="url" id="settings-assigngen-endpoint" placeholder="https://your-backend.example.com/api/ai/generate-assignment" value="${escapeHtml(load(SK.assignGenBackendUrl,''))}">
+      </div>
+      <p class="hint" id="settings-assigngen-status" style="margin-bottom:12px;"></p>
+      <button class="btn btn-primary" id="settings-assigngen-save">Save Backend URL</button>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
       <div class="card-head"><h3>Limitations</h3></div>
       <ul style="margin:0;padding-left:18px;color:var(--text-600);font-size:13px;line-height:1.8;">
         <li>Role switching is a demo selector, not secure authentication.</li>
@@ -4256,6 +4324,7 @@ VIEWS.settings = function(){
         <li>Curriculum chapters and topics are illustrative and have not been verified against official syllabi.</li>
         <li>Image uploads are previewed locally in the browser only and are never stored or transmitted, unless you configure a real evaluation backend above.</li>
         <li>AI evaluation of handwritten submissions (Phase 5) only runs against a backend you configure and deploy yourself; without one, evaluation attempts fail honestly rather than producing fabricated results.</li>
+        <li>Real AI question generation (Phase 9) likewise only runs against a backend you configure and deploy yourself; without one, or if that backend fails, the Assignment Generator falls back to its original deterministic demo generator and always labels which one actually produced a given draft. A reference backend implementing both this and the evaluation contract is included in <code>server/</code> — see <code>server/README.md</code>.</li>
         <li>Per-student performance evidence and AI-suggested feedback are computed from this demo's own submission records; the demo role switch is not a real access-control boundary — a real backend must authorize which students a given teacher may view, <b>and</b> verify a student's own identity before showing them anything (see EVALUATION_BACKEND.md). The "Who are you?" picker on the student side is a demo stand-in for login, not authentication.</li>
         <li>The Reference Library's resource comparison (Phase 8) is a rule-based heuristic over the metadata and notes a teacher enters — it never reads a book's actual content, and depth/clarity/difficulty assessments shown there are literally the teacher's own notes, not an AI judgment.</li>
         <li>The Reference Library's "Check Link" feature can only report whether a browser request to a URL succeeded or failed — cross-origin restrictions mean it cannot read the page's real HTTP status or confirm the content actually loaded correctly.</li>
@@ -4302,6 +4371,19 @@ PAGE_INIT.settings = function(){
     save(SK.evalBackendUrl, val);
     refreshEvalStatus();
     toast(val?'Evaluation backend URL saved.':'Evaluation backend cleared.','success');
+  });
+
+  const assignGenStatusEl = $('#settings-assigngen-status');
+  const refreshAssignGenStatus = ()=>{
+    const url = load(SK.assignGenBackendUrl,'');
+    assignGenStatusEl.textContent = url ? `Configured: ${url}` : 'Not configured — the Assignment Generator will use its built-in demo generator instead.';
+  };
+  refreshAssignGenStatus();
+  $('#settings-assigngen-save').addEventListener('click', function(){
+    const val = $('#settings-assigngen-endpoint').value.trim();
+    save(SK.assignGenBackendUrl, val);
+    refreshAssignGenStatus();
+    toast(val?'Assignment generator backend URL saved.':'Assignment generator backend cleared.','success');
   });
 
 };
