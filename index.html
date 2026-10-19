@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EduPilot AI — Phase 1 Demo</title>
+<title>EduPilot AI — Demo</title>
 <style>
 /* ---------- Reset & tokens ---------- */
 *,*::before,*::after{box-sizing:border-box;}
@@ -241,7 +241,7 @@ tr:last-child td{border-bottom:none;}
 }
 #modal-root{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(10,14,30,.45);z-index:600;padding:16px;}
 #modal-root.show{display:flex;}
-.modal-box{background:#fff;border-radius:var(--radius);padding:22px;max-width:480px;width:100%;box-shadow:var(--shadow-md);}
+.modal-box{background:#fff;border-radius:var(--radius);padding:22px;max-width:480px;width:100%;max-height:calc(100vh - 32px);overflow-y:auto;box-shadow:var(--shadow-md);}
 .modal-box h3{margin-bottom:8px;}
 .modal-box p{color:var(--text-600);font-size:13px;margin-bottom:18px;}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;}
@@ -314,7 +314,7 @@ tr:last-child td{border-bottom:none;}
 <div id="role-gate">
   <div class="role-card">
     <div class="brand"><div class="mark">EP</div><div class="name">EduPilot AI</div></div>
-    <div class="subtitle">Phase 1 demonstration — Karnataka State Board &amp; CBSE, Classes 1–10. Choose a role to preview the experience.</div>
+    <div class="subtitle">Demonstration build — Karnataka State Board &amp; CBSE, Classes 1–10. Choose a role to preview the experience.</div>
     <div class="role-options" id="role-options">
       <div class="role-opt" data-role="teacher">
         <div class="icon" id="ri-teacher"></div>
@@ -324,7 +324,7 @@ tr:last-child td{border-bottom:none;}
       <div class="role-opt" data-role="student">
         <div class="icon" id="ri-student"></div>
         <div class="label">Student</div>
-        <div class="desc">Lectures, results, doubt solving</div>
+        <div class="desc">Lectures, results and feedback</div>
       </div>
       <div class="role-opt" data-role="admin">
         <div class="icon" id="ri-admin"></div>
@@ -358,7 +358,7 @@ tr:last-child td{border-bottom:none;}
     <header id="topbar">
       <button class="btn btn-icon btn-ghost" id="hamburger-btn" aria-label="Menu"></button>
       <div class="page-title" id="page-title">Overview</div>
-      <div class="topbar-search"><span class="icon" id="topbar-search-icon"></span><span>Demo build · Phase 1</span></div>
+      <div class="topbar-search"><span class="icon" id="topbar-search-icon"></span><span>Demo build</span></div>
       <button class="btn btn-sm" id="switch-role-btn">Switch role</button>
     </header>
     <main id="view"></main>
@@ -637,7 +637,7 @@ function seedData(){
     {id:uid('cur'), board:'cbse', class:'9', subject:'Social Science', chapter:'Chapter 1: The French Revolution', topic:'Causes of the revolution', year:DEFAULT_ACADEMIC_YEAR},
   ];
 
-  const yt = 'dQw4w9WgXcQ';
+  const yt = 'jNQXAC9IVRw';
   const lectures = [
     {id:uid('lec'), title:'Introduction to Fractions', description:'A beginner-friendly walkthrough of what fractions represent and how to add fractions with the same denominator.', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'5', subject:'Mathematics', year:DEFAULT_ACADEMIC_YEAR, chapter:'Chapter 4: Fractions', topic:'Adding like fractions', medium:'English Medium', language:'English', objectives:'Understand what a fraction represents\nAdd two fractions with the same denominator', referenceNotes:'Refer to KTBS Mathematics Class 5, Chapter 4 for additional practice problems.', transcript:'', segments:[], createdAt:daysAgo(6)},
     {id:uid('lec'), title:'Force and Pressure — Basics', description:'Introduces the concepts of force and pressure with everyday examples.', url:'https://www.youtube.com/watch?v='+yt, board:'karnataka', class:'8', subject:'Science', year:DEFAULT_ACADEMIC_YEAR, chapter:'Chapter 6: Force and Pressure', topic:'Types of force', medium:'Kannada Medium', language:'Kannada', objectives:'Define force and pressure\nIdentify everyday examples of each type of force', referenceNotes:'Pair with KTBS Science Class 8, Chapter 6 diagrams.', transcript:'', segments:[], createdAt:daysAgo(4)},
@@ -652,6 +652,7 @@ function seedData(){
     {id:uid('asg'), title:'Mean/Median/Mode Practice Set', board:'cbse', class:'7', subject:'Mathematics', chapter:'Chapter 3: Data Handling', lectureId:lectures[2].id, dueDate:daysAgo(1), status:'Overdue'},
     {id:uid('asg'), title:'Laws of Reflection — Diagram Task', board:'cbse', class:'10', subject:'Science', chapter:'Chapter 10: Light — Reflection and Refraction', lectureId:lectures[3].id, dueDate:daysFromNow(7), status:'Open'},
     {id:uid('asg'), title:'Label the Parts of a Plant', board:'karnataka', class:'3', subject:'Environmental Studies', chapter:'Unit 2: Plants Around Us', lectureId:lectures[4].id, dueDate:daysFromNow(2), status:'Open'},
+    {id:uid('asg'), title:'Fractions Worksheet 2', board:'karnataka', class:'5', subject:'Mathematics', chapter:'Chapter 4: Fractions', lectureId:lectures[0].id, dueDate:daysAgo(4), status:'Open'},
   ];
 
   const submissions = [
@@ -661,6 +662,7 @@ function seedData(){
     {id:uid('sub'), studentName:'Student D (Roll 3)', assignmentId:assignments[2].id, board:assignments[2].board, class:assignments[2].class, subject:assignments[2].subject, lectureId:assignments[2].lectureId, status:'Awaiting Evaluation', reviewReason:null, imageMeta:[{name:'data_handling_pg1.jpg', size:2200000, type:'image/jpeg'},{name:'data_handling_pg2.jpg', size:2100000, type:'image/jpeg'}], score:null, feedback:'', submittedAt:daysAgo(4), updatedAt:daysAgo(4)},
     {id:uid('sub'), studentName:'Student E (Roll 15)', assignmentId:assignments[3].id, board:assignments[3].board, class:assignments[3].class, subject:assignments[3].subject, lectureId:assignments[3].lectureId, status:'Needs Teacher Review', reviewReason:'Incomplete upload — only 1 of 2 expected pages were received.', imageMeta:[{name:'reflection_pg1.jpg', size:1800000, type:'image/jpeg'}], score:null, feedback:'', submittedAt:daysAgo(0), updatedAt:daysAgo(0)},
     {id:uid('sub'), studentName:'Student F (Roll 9)', assignmentId:assignments[4].id, board:assignments[4].board, class:assignments[4].class, subject:assignments[4].subject, lectureId:assignments[4].lectureId, status:'Evaluated', reviewReason:null, imageMeta:[{name:'plant_parts.jpg', size:1540000, type:'image/jpeg'}], score:76, feedback:'Most parts labelled correctly; revise "stem" vs "stalk".', submittedAt:daysAgo(2), updatedAt:daysAgo(2)},
+    {id:uid('sub'), studentName:'Student A (Roll 12)', assignmentId:assignments[5].id, board:assignments[5].board, class:assignments[5].class, subject:assignments[5].subject, lectureId:assignments[5].lectureId, status:'Evaluated', reviewReason:null, imageMeta:[{name:'fractions2_pg1.jpg', size:1790000, type:'image/jpeg'}], score:64, feedback:'Struggled with unlike denominators; revisit finding a common denominator before adding.', submittedAt:daysAgo(5), updatedAt:daysAgo(5)},
   ];
 
   const library = [
@@ -4350,8 +4352,10 @@ PAGE_INIT.settings = function(){
     toast('Demo data exported.','success');
   });
   $('#settings-reset').addEventListener('click', function(){
-    confirmAction('Reset all demo data?','This clears all demo lectures, assignments, submissions and reference entries, then reloads the sample dataset. This cannot be undone.', ()=>{
-      Object.values(SK).forEach(k=>{ if(typeof k==='string') localStorage.removeItem(k); });
+    confirmAction('Reset all demo data?','This clears all demo lectures, assignments, submissions, reference entries and chat history, then reloads the sample dataset. Your current role and any configured backend URLs are kept. This cannot be undone.', ()=>{
+      const demoDataKeys = [SK.seed, SK.curriculum, SK.lectures, SK.assignments, SK.submissions, SK.library, SK.generatedAssignments, SK.studentFeedback];
+      demoDataKeys.forEach(k=>localStorage.removeItem(k));
+      Object.keys(localStorage).filter(k=>k.startsWith(SK.chat)).forEach(k=>localStorage.removeItem(k));
       seedData();
       migrateLectureSchema();
       migrateSubmissionSchema();
