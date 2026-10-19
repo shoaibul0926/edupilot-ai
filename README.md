@@ -2,6 +2,8 @@
 
 An AI-powered teaching assistant demo for CBSE and Karnataka State Board schools, Classes 1–10. Single static HTML file, no login — open `index.html` in a browser to run it.
 
+**Live demo:** https://edupilot-ai-nine.vercel.app
+
 Covers: AI resource discovery, assignment/question-paper generation, handwritten submission uploads, AI evaluation, student performance tracking with AI-suggested feedback, and a reference library with resource comparison.
 
 ## Running it
