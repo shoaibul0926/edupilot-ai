@@ -90,16 +90,52 @@ question together and does this matching itself.
 ## Security notice
 
 This is a **demo reference implementation**, not production-ready:
-- CORS is wide open (`cors()` with no options) so a locally-opened
-  frontend can reach it from any origin — fine for a local demo, unsafe on
-  the public internet.
+- CORS defaults to allowing only `localhost`/`127.0.0.1` (any port). Set
+  `ALLOWED_ORIGINS` (see `.env.example`) to permit a specific deployed
+  frontend origin too — see "Deploying publicly" below. An unlisted
+  origin gets a `403` and no `Access-Control-Allow-Origin` header.
 - There is no authentication on any endpoint. Per the Phase 9 scope, this
-  project deliberately does not add login/auth — don't expose this server
-  beyond `127.0.0.1` without adding your own.
+  project deliberately does not add login/auth. A per-IP rate limit
+  (`AI_RATE_LIMIT`, default 20 requests/15min on the three AI-backed
+  routes) exists only as a blunt cap against runaway API cost — it is not
+  real abuse protection, and does nothing to stop a determined attacker
+  who isn't going through a browser's CORS restrictions.
 - Uploaded images are processed in memory and discarded after the
   response; nothing is written to disk or a database by this server.
 
 See `../EVALUATION_BACKEND.md` §4 for the full list of things a real,
-publicly-deployed version of this would need (auth, per-tenant
-authorization, rate limiting, retention policy, etc.) — none of that is in
-scope for this local demo.
+publicly-deployed version of this would need (real auth, per-tenant
+authorization, proper rate limiting, retention policy, etc.) — none of
+that is in scope for this reference implementation.
+
+## Deploying publicly (e.g. Render)
+
+A `render.yaml` Blueprint is included at the repo root so Render can
+provision this automatically:
+
+1. Push this repo to GitHub (already done if you're reading this from
+   the repo) and sign in to [Render](https://render.com) with that GitHub
+   account.
+2. **New → Blueprint**, select this repo. Render reads `render.yaml` and
+   proposes one web service (`edupilot-ai-backend`, free plan, rooted at
+   `server/`).
+3. Before deploying, set the **`ANTHROPIC_API_KEY`** environment variable
+   yourself in Render's dashboard (it's marked `sync: false` in the
+   blueprint specifically so it is never written into the repo or typed
+   by anyone else — paste it there directly, not anywhere in this
+   project). Real AI features won't work without it (or without a funded
+   balance on that key).
+4. Adjust `ALLOWED_ORIGINS` in the blueprint/dashboard if your deployed
+   frontend isn't at `edupilot-ai-nine.vercel.app`.
+5. Once deployed, Render gives you a URL like
+   `https://edupilot-ai-backend.onrender.com`. In EduPilot AI's
+   **Settings** page, point each backend URL field at it (e.g.
+   `.../evaluate`, `.../generate-assignment`, `.../analyze-mistakes`) —
+   exactly like pointing them at `127.0.0.1:8787` locally, just a public
+   URL instead. This is still opt-in per browser/visitor; nothing in the
+   frontend auto-connects to it.
+
+**Free-tier note:** Render's free web services sleep after inactivity —
+the first request after idle can take 30–50 seconds while it wakes up.
+The frontend's existing honest-failure UI (spinner / error message, never
+a fake result) handles this fine; it just looks slow on that first call.

@@ -9,7 +9,7 @@ Covers: AI resource discovery, assignment/question-paper generation, handwritten
 ## Running it
 
 - **Frontend only (demo mode):** open `index.html` directly, or serve the folder with any static file server.
-- **With a real AI backend:** see [`server/README.md`](server/README.md) — a working Node/Express reference backend that does real OCR grading and, with your own `ANTHROPIC_API_KEY`, real AI question generation and evaluation. Point Settings → AI Evaluation Backend / Assignment Generator Backend at it once running.
+- **With a real AI backend:** see [`server/README.md`](server/README.md) — a working Node/Express reference backend that does real OCR grading and, with your own `ANTHROPIC_API_KEY`, real AI question generation, evaluation and mistake analysis. Run it locally, or deploy it (e.g. to Render, one-click via the included `render.yaml`) so the live demo can opt into it too — see "Deploying publicly" in `server/README.md`. Point Settings → the relevant Backend URL field at it once running, locally or deployed.
 
 ## Phase 10 — Testing & Demo Readiness
 
