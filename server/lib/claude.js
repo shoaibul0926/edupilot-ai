@@ -65,4 +65,43 @@ If the lecture content above is too sparse to responsibly generate the requested
   return extractJson(text);
 }
 
-module.exports = { isClaudeConfigured, evaluateWithClaude, generateWithClaude };
+/* Phase 13: open-ended mistake analysis for submissions that don't have an
+ * approved question set to grade against (general submissions, written
+ * text answers, or any photo/document a student submits for self-review).
+ * Distinct from evaluateWithClaude: that one grades strictly against a
+ * teacher-approved marking scheme; this one reviews freeform work and
+ * explains mistakes in student-friendly language, with no marking scheme
+ * input and no score output — it is never treated as an official grade.
+ */
+async function analyzeMistakesWithClaude(payload, files){
+  const anthropic = client();
+  const content = [];
+  if (files && files.length) {
+    for (const f of files) {
+      if (f.mimetype === 'application/pdf') {
+        content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.buffer.toString('base64') } });
+      } else {
+        content.push({ type: 'image', source: { type: 'base64', media_type: f.mimetype || 'image/jpeg', data: f.buffer.toString('base64') } });
+      }
+    }
+  }
+  const basis = payload.kind === 'text'
+    ? `The student's typed written answer is given below — read it directly, no OCR needed:\n"""${payload.textAnswer}"""`
+    : `The student's work is attached as ${payload.kind === 'document' ? 'a document' : 'photographed image(s)'}. Read it as carefully as you can.`;
+  const prompt = `You are a patient CBSE/Karnataka State Board tutor reviewing a Class ${payload.class} ${payload.subject} student's submitted work titled "${payload.title}", so you can point out mistakes and explain them in age-appropriate language the student can learn from.
+${basis}
+If the handwriting or scan is too unclear to confidently read a part of the answer, do not guess — mark that item's assessment as "uncertain" and explain what's unclear instead of inventing content.
+Respond with ONLY a single JSON object matching this exact shape, no other text, no markdown fences:
+{"overallAssessment":"correct|partially_correct|incorrect|uncertain","summary":"one or two sentence overview for the student","items":[{"excerpt":"the student's original answer or the relevant section, quoted or closely paraphrased from what you can actually read","assessment":"correct|partially_correct|incorrect|uncertain","mistake":"what's wrong, or null if correct","explanation":"simple age-appropriate reason why","correction":"the corrected answer or proper form","steps":["step-by-step reasoning, only for math problems, else omit"],"tip":"a short learning tip to avoid this mistake next time"}],"flags":["illegible_handwriting","low_confidence","needs_teacher_review"]}
+Board: ${payload.board}. Keep language simple and encouraging, suitable for a Class ${payload.class} student.`;
+
+  const msg = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: [...content, { type: 'text', text: prompt }] }],
+  });
+  const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+  return extractJson(text);
+}
+
+module.exports = { isClaudeConfigured, evaluateWithClaude, generateWithClaude, analyzeMistakesWithClaude };

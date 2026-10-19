@@ -4,7 +4,7 @@ const cors = require('cors');
 const multer = require('multer');
 const { recognizeImages, terminateWorker } = require('./lib/ocr');
 const { gradeWithHeuristics } = require('./lib/grading');
-const { isClaudeConfigured, evaluateWithClaude, generateWithClaude } = require('./lib/claude');
+const { isClaudeConfigured, evaluateWithClaude, generateWithClaude, analyzeMistakesWithClaude } = require('./lib/claude');
 
 const app = express();
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
@@ -67,6 +67,43 @@ app.post('/generate-assignment', async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(502).send('Generation failed: ' + (err && err.message ? err.message : 'unknown error'));
+  }
+});
+
+// Matches the contract in ../MISTAKE_ANALYSIS_BACKEND.md. Open-ended mistake
+// analysis for submissions with no approved question set to grade against
+// (Phase 13). There is no local heuristic fallback, for the same reason as
+// /generate-assignment: explaining *why* something is wrong requires real
+// reasoning, not just OCR text extraction, so without a configured model
+// this reports NOT_CONFIGURED honestly instead of fabricating an analysis.
+app.post('/analyze-mistakes', upload.array('files'), async (req, res) => {
+  let payload;
+  try {
+    payload = JSON.parse(req.body.payload);
+  } catch {
+    return res.status(400).send('Invalid or missing `payload` field (must be a JSON string).');
+  }
+  if (!payload || !payload.kind) return res.status(400).send('payload.kind is required.');
+  if (payload.kind === 'text' && !(payload.textAnswer || '').trim()) {
+    return res.status(400).send('payload.textAnswer is required for kind "text".');
+  }
+  const files = req.files || [];
+  if (payload.kind !== 'text' && !files.length) {
+    return res.status(400).send('At least one file is required in the `files` field for non-text submissions.');
+  }
+
+  if (!isClaudeConfigured()) {
+    return res.status(501).json({
+      errorCode: 'NOT_CONFIGURED',
+      message: 'No ANTHROPIC_API_KEY is set on this server, so AI mistake analysis is unavailable. There is no local heuristic fallback for open-ended analysis (unlike grading against an approved question set) — configure a key to enable it.',
+    });
+  }
+  try {
+    const result = await analyzeMistakesWithClaude(payload, files);
+    return res.json(result);
+  } catch (err) {
+    console.error(err);
+    return res.status(502).send('Analysis failed: ' + (err && err.message ? err.message : 'unknown error'));
   }
 });
 

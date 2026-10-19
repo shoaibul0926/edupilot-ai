@@ -545,6 +545,7 @@ const SK = {
   studentFeedback:'edupilot_studentFeedback',
   doubtBackendUrl:'edupilot_doubtBackendUrl',
   assignGenBackendUrl:'edupilot_assignGenBackendUrl',
+  analysisBackendUrl:'edupilot_analysisBackendUrl',
 };
 function load(key, fallback){
   try{
@@ -761,6 +762,7 @@ function migrateSubmissionSchema(){
       board:a?a.board:null, class:a?a.class:null, subject:a?a.subject:null, lectureId:a?a.lectureId:null,
       imageMeta:[], reviewReason:null, updatedAt:s.submittedAt||new Date().toISOString(),
       evaluation:{ocr:null, grading:null, review:null, auditTrail:[]},
+      kind:'image', fileMeta:[], textAnswer:null, mistakeAnalysis:null,
       ...s,
     };
     if(merged.status === 'Pending Review'){ merged.status = 'Awaiting Evaluation'; changed = true; }
@@ -2523,6 +2525,167 @@ const AIEvaluationService = {
   },
 };
 
+/* Phase 13: open-ended mistake analysis for a submission's own content —
+   distinct from AIEvaluationService above, which grades strictly against a
+   teacher-approved question set. This never produces a score; it is purely
+   explanatory and stored separately on the submission (mistakeAnalysis),
+   never mixed into the official status/score/feedback fields. */
+const AIMistakeAnalysisService = {
+  isConfigured(){ return !!(load(SK.analysisBackendUrl,'')||'').trim(); },
+  async analyze(submission){
+    const endpoint = (load(SK.analysisBackendUrl,'')||'').trim();
+    if(!endpoint) return {ok:false, errorCode:'NOT_CONFIGURED', message:'No AI mistake analysis backend is configured. Add one on the Settings page — see MISTAKE_ANALYSIS_BACKEND.md for the required contract.'};
+    const kind = submission.kind || 'image';
+    const payload = {title:submission.title||'', board:submission.board, class:submission.class, subject:submission.subject, kind, textAnswer:kind==='text'?(submission.textAnswer||''):null};
+    const fd = new FormData();
+    fd.append('payload', JSON.stringify(payload));
+    if(kind!=='text'){
+      const files = SubmissionImageStore[submission.id] || [];
+      if(!files.length) return {ok:false, errorCode:'NO_FILES', message:'The original file(s) for this submission are not available in this browser session, so there is nothing to send for analysis.'};
+      for(const f of files){
+        const blob = await fetch(f.url).then(r=>r.blob());
+        fd.append('files', blob, f.name);
+      }
+    }
+    try{
+      const res = await fetch(endpoint, {method:'POST', body:fd});
+      if(!res.ok){
+        const text = await res.text().catch(()=>'');
+        return {ok:false, errorCode:'BACKEND_ERROR', message:`Analysis backend returned HTTP ${res.status}.${text?' '+text:''}`};
+      }
+      const data = await res.json();
+      return {ok:true, data};
+    } catch(err){
+      return {ok:false, errorCode:'NETWORK_ERROR', message:'Could not reach the analysis backend: '+(err&&err.message?err.message:'unknown error')};
+    }
+  },
+};
+
+/* Reuses an already-computed teacher AI evaluation (image submissions with
+   an approved question set) as mistake-analysis items, instead of making a
+   second AI call for data that already exists. */
+function analysisFromEvaluation(s){
+  const results = s.evaluation && s.evaluation.grading && s.evaluation.grading.questionResults;
+  if(!results || !results.length) return null;
+  const teacherMarks = (s.evaluation.review && s.evaluation.review.teacherMarks) || null;
+  const items = results.map(r=>{
+    const marks = teacherMarks && teacherMarks[r.questionId]!=null ? teacherMarks[r.questionId] : r.suggestedMarks;
+    const ratio = r.maxMarks ? marks / r.maxMarks : 0;
+    const uncertain = (r.confidence!=null && r.confidence < 0.5) || (r.flags && r.flags.length);
+    const assessment = uncertain ? 'uncertain' : ratio>=1 ? 'correct' : ratio<=0 ? 'incorrect' : 'partially_correct';
+    return {
+      excerpt: null, assessment,
+      mistake: assessment==='correct' ? null : (r.misconceptions && r.misconceptions[0]) || null,
+      explanation: r.reasoning || '', correction: null, steps: null,
+      tip: (r.misconceptions && r.misconceptions.length>1) ? r.misconceptions.slice(1).join(' ') : null,
+    };
+  });
+  const allCorrect = items.every(i=>i.assessment==='correct');
+  const anyUncertain = items.some(i=>i.assessment==='uncertain');
+  const overallAssessment = anyUncertain ? 'uncertain' : allCorrect ? 'correct' : items.some(i=>i.assessment==='incorrect') ? (items.some(i=>i.assessment==='correct')?'partially_correct':'incorrect') : 'partially_correct';
+  return {overallAssessment, summary:'Based on your teacher’s AI-assisted evaluation of this submission, reviewed against the approved question set.', items, flags:[], source:'teacher_evaluation'};
+}
+
+const MISTAKE_ASSESSMENT_LABEL = {correct:'Correct', partially_correct:'Partially Correct', incorrect:'Incorrect', uncertain:'Needs a closer look'};
+function mistakePillClass(assessment){
+  return assessment==='correct' ? 'pill-evaluated' : assessment==='uncertain' ? 'pill-pending' : 'pill-overdue';
+}
+function renderMistakeAnalysisBlock(s, canEvaluate){
+  const kind = s.kind || 'image';
+  const reused = analysisFromEvaluation(s);
+  const data = reused || s.mistakeAnalysis;
+  const sourceLabel = reused ? 'From your teacher’s AI-assisted evaluation — not a separate AI call.' : 'AI-generated self-review — not an official grade; your teacher’s evaluation is the official score.';
+
+  if(data){
+    return `
+      <div class="card" style="margin-top:14px;">
+        <div class="card-head"><h3>AI Mistake Analysis <span class="demo-label">Phase 13</span></h3></div>
+        <p class="hint" style="margin-bottom:10px;">${sourceLabel}</p>
+        <p><span class="pill ${mistakePillClass(data.overallAssessment)}">${MISTAKE_ASSESSMENT_LABEL[data.overallAssessment]||data.overallAssessment}</span></p>
+        <p style="margin:8px 0;">${escapeHtml(data.summary||'')}</p>
+        ${(data.items||[]).map(it=>`
+          <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px;">
+            ${it.excerpt?`<p class="hint" style="margin-bottom:4px;">"${escapeHtml(it.excerpt)}"</p>`:''}
+            <p><span class="pill ${mistakePillClass(it.assessment)}">${MISTAKE_ASSESSMENT_LABEL[it.assessment]||it.assessment}</span></p>
+            ${it.mistake?`<p><b>Mistake:</b> ${escapeHtml(it.mistake)}</p>`:''}
+            ${it.explanation?`<p><b>Why:</b> ${escapeHtml(it.explanation)}</p>`:''}
+            ${it.correction?`<p><b>Correction:</b> ${escapeHtml(it.correction)}</p>`:''}
+            ${it.steps&&it.steps.length?`<ol>${it.steps.map(st=>`<li>${escapeHtml(st)}</li>`).join('')}</ol>`:''}
+            ${it.tip?`<p class="hint">Tip: ${escapeHtml(it.tip)}</p>`:''}
+          </div>`).join('') || `<p class="hint">No specific items were returned.</p>`}
+        ${data.flags && data.flags.length ? `<div class="info-banner" style="margin-top:10px;">${ico('shield')}<div>Flagged: ${data.flags.map(f=>escapeHtml(f)).join(', ')} — treat this analysis as uncertain where flagged, and check with your teacher.</div></div>` : ''}
+      </div>`;
+  }
+
+  if(canEvaluate){
+    return `<div class="card" style="margin-top:14px;"><div class="card-head"><h3>AI Mistake Analysis <span class="demo-label">Phase 13</span></h3></div><p class="hint">Not analyzed yet — this is a student-triggered self-review action.</p></div>`;
+  }
+
+  const unsupportedDoc = kind==='document' && !(s.fileMeta||[]).some(m=>m.type==='application/pdf');
+  if(unsupportedDoc){
+    return `<div class="card" style="margin-top:14px;"><div class="card-head"><h3>AI Mistake Analysis <span class="demo-label">Phase 13</span></h3></div><div class="info-banner">${ico('shield')}<div>Analysis isn’t available for Word documents yet — only PDF documents, photos, and written answers can be analyzed.</div></div></div>`;
+  }
+
+  return `<div class="card" style="margin-top:14px;">
+    <div class="card-head"><h3>AI Mistake Analysis <span class="demo-label">Phase 13</span></h3></div>
+    <p class="hint" style="margin-bottom:10px;">Get an AI-generated explanation of any mistakes in this submission — for your own learning, not an official grade.</p>
+    <button type="button" class="btn btn-primary" id="sub-analyze-btn" data-id="${s.id}">Analyze My Work</button>
+    <div id="sub-analyze-status" class="hint" style="margin-top:8px;"></div>
+  </div>`;
+}
+
+function openSubmissionDetailModal(id){
+  const subs = load(SK.submissions, []);
+  const s = subs.find(x=>x.id===id); if(!s) return;
+  const canEvaluate = isTeacherOrAdmin();
+  const kind = s.kind || 'image';
+  const images = SubmissionImageStore[id];
+  const audit = (s.evaluation && s.evaluation.auditTrail) || [];
+  let attachmentBody;
+  if(kind==='text'){
+    attachmentBody = `<div style="margin-top:10px;"><p class="hint" style="margin-bottom:6px;">Written Answer</p><p style="white-space:pre-wrap;">${escapeHtml(s.textAnswer||'')}</p></div>`;
+  } else {
+    const meta = kind==='document' ? (s.fileMeta||[]) : (s.imageMeta||[]);
+    attachmentBody = images && images.length
+      ? `<div class="img-thumb-grid">${images.map(img=> kind==='document'
+          ? `<div class="file-chip"><a href="${img.url}" target="_blank" rel="noopener" class="file-chip-name" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</a></div>`
+          : `<a href="${img.url}" target="_blank" rel="noopener" class="img-thumb" title="Open full size"><img src="${img.url}" alt="${escapeHtml(img.name)}"><span class="img-name">${escapeHtml(img.name)}</span></a>`
+        ).join('')}</div>`
+      : `<div class="info-banner">${ico('shield')}<div>${meta.length} file(s) were attached (${meta.map(m=>escapeHtml(m.name)).join(', ')||'none'}), but the original files were only kept in memory for this browser session and are no longer available after a reload. In the real product these would be stored securely on the server and remain viewable at any time.</div></div>`;
+  }
+  openModalHtml(`
+    <h3>Submission Details</h3>
+    <p>${escapeHtml(s.studentName)} &middot; ${escapeHtml(s.title||'Untitled submission')}</p>
+    <p class="hint">${boardLabel(s.board)} · Class ${s.class||''} · ${escapeHtml(s.subject||'')}</p>
+    <p class="hint">Status: <span class="pill ${statusPillClass(s.status)}">${s.status}</span>${s.reviewReason?' — '+escapeHtml(s.reviewReason):''}</p>
+    ${attachmentBody}
+    ${renderMistakeAnalysisBlock(s, canEvaluate)}
+    ${audit.length?`<div style="margin-top:14px;"><b style="font-size:12.5px;">Evaluation Audit Trail</b>
+      <div class="table-wrap" style="margin-top:6px;"><table><thead><tr><th>When</th><th>Action</th><th>Details</th></tr></thead><tbody>
+        ${audit.slice().reverse().map(e=>`<tr><td style="white-space:nowrap;">${fmtDate(e.at)}</td><td>${escapeHtml(e.action)}</td><td>${escapeHtml(e.details||'')}</td></tr>`).join('')}
+      </tbody></table></div></div>`:''}
+    <div class="modal-actions" style="margin-top:16px;"><button type="button" class="btn" data-action="modal-close">Close</button></div>`, true);
+
+  const analyzeBtn = $('#sub-analyze-btn');
+  if(analyzeBtn){
+    analyzeBtn.addEventListener('click', async function(){
+      const statusEl = $('#sub-analyze-status');
+      analyzeBtn.disabled = true;
+      statusEl.textContent = 'Analyzing… this sends your work to the configured AI backend.';
+      const result = await AIMistakeAnalysisService.analyze(s);
+      if(result.ok){
+        const all = load(SK.submissions, []);
+        const rec = all.find(x=>x.id===id);
+        if(rec){ rec.mistakeAnalysis = {...result.data, analyzedAt:new Date().toISOString()}; save(SK.submissions, all); }
+        openSubmissionDetailModal(id);
+      } else {
+        analyzeBtn.disabled = false;
+        statusEl.innerHTML = `<span style="color:var(--danger);">${escapeHtml(result.message)}</span>`;
+      }
+    });
+  }
+}
+
 const AIEvalModal = { submissionId:null, loading:false, result:null, error:null };
 
 function findApprovedQuestionSet(assignmentId){
@@ -3030,34 +3193,9 @@ PAGE_INIT.submissions = function(){
     const id = btn.dataset.id;
     const subs = load(SK.submissions, []);
     const s = subs.find(x=>x.id===id); if(!s) return;
-    const kind = s.kind || 'image';
 
     if(btn.dataset.action==='sub-view'){
-      const images = SubmissionImageStore[id];
-      const audit = (s.evaluation && s.evaluation.auditTrail) || [];
-      let attachmentBody;
-      if(kind==='text'){
-        attachmentBody = `<div style="margin-top:10px;"><p class="hint" style="margin-bottom:6px;">Written Answer</p><p style="white-space:pre-wrap;">${escapeHtml(s.textAnswer||'')}</p></div>`;
-      } else {
-        const meta = kind==='document' ? (s.fileMeta||[]) : (s.imageMeta||[]);
-        attachmentBody = images && images.length
-          ? `<div class="img-thumb-grid">${images.map(img=> kind==='document'
-              ? `<div class="file-chip"><a href="${img.url}" target="_blank" rel="noopener" class="file-chip-name" title="${escapeHtml(img.name)}">${escapeHtml(img.name)}</a></div>`
-              : `<a href="${img.url}" target="_blank" rel="noopener" class="img-thumb" title="Open full size"><img src="${img.url}" alt="${escapeHtml(img.name)}"><span class="img-name">${escapeHtml(img.name)}</span></a>`
-            ).join('')}</div>`
-          : `<div class="info-banner">${ico('shield')}<div>${meta.length} file(s) were attached (${meta.map(m=>escapeHtml(m.name)).join(', ')||'none'}), but the original files were only kept in memory for this browser session and are no longer available after a reload. In the real product these would be stored securely on the server and remain viewable at any time.</div></div>`;
-      }
-      openModalHtml(`
-        <h3>Submission Details</h3>
-        <p>${escapeHtml(s.studentName)} &middot; ${escapeHtml(s.title||'Untitled submission')}</p>
-        <p class="hint">${boardLabel(s.board)} · Class ${s.class||''} · ${escapeHtml(s.subject||'')}</p>
-        <p class="hint">Status: <span class="pill ${statusPillClass(s.status)}">${s.status}</span>${s.reviewReason?' — '+escapeHtml(s.reviewReason):''}</p>
-        ${attachmentBody}
-        ${audit.length?`<div style="margin-top:14px;"><b style="font-size:12.5px;">Evaluation Audit Trail</b>
-          <div class="table-wrap" style="margin-top:6px;"><table><thead><tr><th>When</th><th>Action</th><th>Details</th></tr></thead><tbody>
-            ${audit.slice().reverse().map(e=>`<tr><td style="white-space:nowrap;">${fmtDate(e.at)}</td><td>${escapeHtml(e.action)}</td><td>${escapeHtml(e.details||'')}</td></tr>`).join('')}
-          </tbody></table></div></div>`:''}
-        <div class="modal-actions" style="margin-top:16px;"><button type="button" class="btn" data-action="modal-close">Close</button></div>`, true);
+      openSubmissionDetailModal(id);
     }
 
     if(btn.dataset.action==='sub-ai-eval'){
@@ -4534,6 +4672,17 @@ VIEWS.settings = function(){
     </div>
 
     <div class="card" style="margin-top:20px;">
+      <div class="card-head"><h3>AI Mistake Analysis Backend <span class="demo-label">Phase 13</span></h3></div>
+      <p class="hint" style="margin-bottom:12px;">Open-ended AI explanations of mistakes in a student's own submitted work (written answers, photos, or PDFs) require a backend server you control, holding your own AI provider credentials — this demo never stores or sends any API key from the browser. Point this at your backend's endpoint once you have one running; see <code>MISTAKE_ANALYSIS_BACKEND.md</code> in the project for the exact request/response contract. This is separate from the Evaluation Backend above — it works even for submissions with no linked assignment or question set.</p>
+      <div class="field">
+        <label>Mistake Analysis Backend URL</label>
+        <input type="url" id="settings-analysis-endpoint" placeholder="https://your-backend.example.com/api/ai/analyze-mistakes" value="${escapeHtml(load(SK.analysisBackendUrl,''))}">
+      </div>
+      <p class="hint" id="settings-analysis-status" style="margin-bottom:12px;"></p>
+      <button class="btn btn-primary" id="settings-analysis-save">Save Backend URL</button>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
       <div class="card-head"><h3>Limitations</h3></div>
       <ul style="margin:0;padding-left:18px;color:var(--text-600);font-size:13px;line-height:1.8;">
         <li>Role switching is a demo selector, not secure authentication.</li>
@@ -4542,6 +4691,7 @@ VIEWS.settings = function(){
         <li>Image uploads are previewed locally in the browser only and are never stored or transmitted, unless you configure a real evaluation backend above.</li>
         <li>AI evaluation of handwritten submissions (Phase 5) only runs against a backend you configure and deploy yourself; without one, evaluation attempts fail honestly rather than producing fabricated results.</li>
         <li>Real AI question generation (Phase 9) likewise only runs against a backend you configure and deploy yourself; without one, or if that backend fails, the Assignment Generator falls back to its original deterministic demo generator and always labels which one actually produced a given draft. A reference backend implementing both this and the evaluation contract is included in <code>server/</code> — see <code>server/README.md</code>.</li>
+        <li>AI Mistake Analysis (Phase 13) is a student-triggered, open-ended explanation of a submission's own mistakes — it is informational only, never an official score, and only runs against a backend you configure; without one it reports this honestly instead of fabricating an analysis. Word documents (DOC/DOCX) are not analyzed — only PDFs, photos and typed answers — since reliable text extraction from DOC/DOCX needs a library this project does not bundle.</li>
         <li>Per-student performance evidence and AI-suggested feedback are computed from this demo's own submission records; the demo role switch is not a real access-control boundary — a real backend must authorize which students a given teacher may view, <b>and</b> verify a student's own identity before showing them anything (see EVALUATION_BACKEND.md). The "Who are you?" picker on the student side is a demo stand-in for login, not authentication.</li>
         <li>The Reference Library's resource comparison (Phase 8) is a rule-based heuristic over the metadata and notes a teacher enters — it never reads a book's actual content, and depth/clarity/difficulty assessments shown there are literally the teacher's own notes, not an AI judgment.</li>
         <li>The Reference Library's "Check Link" feature can only report whether a browser request to a URL succeeded or failed — cross-origin restrictions mean it cannot read the page's real HTTP status or confirm the content actually loaded correctly.</li>
@@ -4603,6 +4753,19 @@ PAGE_INIT.settings = function(){
     save(SK.assignGenBackendUrl, val);
     refreshAssignGenStatus();
     toast(val?'Assignment generator backend URL saved.':'Assignment generator backend cleared.','success');
+  });
+
+  const analysisStatusEl = $('#settings-analysis-status');
+  const refreshAnalysisStatus = ()=>{
+    const url = load(SK.analysisBackendUrl,'');
+    analysisStatusEl.textContent = url ? `Configured: ${url}` : 'Not configured — AI mistake analysis will report this honestly instead of producing results.';
+  };
+  refreshAnalysisStatus();
+  $('#settings-analysis-save').addEventListener('click', function(){
+    const val = $('#settings-analysis-endpoint').value.trim();
+    save(SK.analysisBackendUrl, val);
+    refreshAnalysisStatus();
+    toast(val?'Mistake analysis backend URL saved.':'Mistake analysis backend cleared.','success');
   });
 
 };
