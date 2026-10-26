@@ -230,6 +230,11 @@ tr:last-child td{border-bottom:none;}
   .print-paper h1{font-size:19px;margin-bottom:4px;}
   .print-paper .print-meta{font-size:12px;margin-bottom:4px;}
   .print-paper hr{border:none;border-top:1px solid #000;margin:10px 0 16px;}
+  .print-instructions{font-size:12px;margin:10px 0;}
+  .print-instructions b{display:block;margin-bottom:4px;}
+  .print-instructions ol{padding-left:18px;margin:0;}
+  .print-section-title{font-size:14px;font-weight:700;margin:16px 0 8px;text-transform:uppercase;letter-spacing:.02em;}
+  .print-section-sub{font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:#333;}
   .print-questions{padding-left:20px;margin:0;}
   .print-questions > li{margin-bottom:18px;font-size:13px;page-break-inside:avoid;}
   .print-marks{font-weight:700;font-size:11px;}
@@ -2142,42 +2147,84 @@ function renderGenQuestionCard(q, idx){
    separate teacher-only printout. */
 function printLines(n){ return Array.from({length:n}).map(()=>'<div class="print-line"></div>').join(''); }
 
+/* CBSE-style sectioning: group a paper's questions by type into lettered
+   sections (A, B, C, D...) in a fixed CBSE paper order, each with its own
+   heading and continuous numbering across the whole paper — only sections
+   that actually have questions are shown. This is a formatting convention
+   this demo follows, not a claim that the paper matches an official CBSE
+   exam blueprint (see the "not verified" banner elsewhere in this app). */
+const CBSE_SECTION_ORDER = [
+  {type:'mcq', label:'Multiple Choice Questions'},
+  {type:'short', label:'Short Answer Questions'},
+  {type:'sum', label:'Numerical / Application Based Questions'},
+  {type:'long', label:'Long Answer Questions'},
+];
+function cbseSections(questions){
+  let n = 1;
+  const letters = 'ABCDEFGH';
+  const sections = [];
+  CBSE_SECTION_ORDER.forEach(({type, label})=>{
+    const qs = questions.filter(q=>q.type===type);
+    if(!qs.length) return;
+    const marksList = uniqueSorted(qs.map(q=>String(q.marks)));
+    sections.push({
+      letter: letters[sections.length],
+      label, questions: qs, startNum: n,
+      marksNote: `${qs.length} question${qs.length===1?'':'s'} &times; ${marksList.join('/')} mark${marksList.every(m=>m==='1')?'':'s'} each`,
+    });
+    n += qs.length;
+  });
+  return sections;
+}
+const CBSE_GENERAL_INSTRUCTIONS = [
+  'All questions are compulsory.',
+  'Marks for each question are indicated against it.',
+  'Write your answers clearly and show your working where applicable.',
+];
+
 function buildQuestionPaperHtml(a){
   const totalMarks = a.questions.reduce((s,q)=>s+(Number(q.marks)||0),0);
+  const sections = cbseSections(a.questions);
   return `<div class="print-paper">
     <h1>${escapeHtml(a.title)}</h1>
     <div class="print-meta">${boardLabel(a.board)} &middot; Class ${a.class} &middot; ${escapeHtml(a.subject)} &middot; ${escapeHtml(a.chapter)}</div>
     <div class="print-meta">Total Marks: ${totalMarks} &nbsp;&nbsp; Time: _________</div>
     <div class="print-meta">Student Name: ______________________________ &nbsp;&nbsp; Roll No: ___________</div>
     <hr>
-    <ol class="print-questions">
-      ${a.questions.map(q=>`<li>
-        <div class="print-q-text">${escapeHtml(q.text)} <span class="print-marks">[${q.marks} mark${q.marks===1?'':'s'}]</span></div>
-        ${q.type==='mcq'
-          ? `<ol class="print-options">${q.options.map(opt=>`<li>${escapeHtml(opt)}</li>`).join('')}</ol>`
-          : `<div class="print-answer-space">${printLines(q.type==='long'?6:3)}</div>`}
-      </li>`).join('')}
-    </ol>
+    <div class="print-instructions"><b>General Instructions:</b><ol>${CBSE_GENERAL_INSTRUCTIONS.map(i=>`<li>${escapeHtml(i)}</li>`).join('')}</ol></div>
+    ${sections.map(sec=>`
+      <div class="print-section-title">Section ${sec.letter} — ${escapeHtml(sec.label)} <span class="print-section-sub">(${sec.marksNote})</span></div>
+      <ol class="print-questions" start="${sec.startNum}">
+        ${sec.questions.map(q=>`<li>
+          <div class="print-q-text">${escapeHtml(q.text)} <span class="print-marks">[${q.marks} mark${q.marks===1?'':'s'}]</span></div>
+          ${q.type==='mcq'
+            ? `<ol class="print-options">${q.options.map(opt=>`<li>${escapeHtml(opt)}</li>`).join('')}</ol>`
+            : `<div class="print-answer-space">${printLines(q.type==='long'?6:3)}</div>`}
+        </li>`).join('')}
+      </ol>`).join('')}
   </div>`;
 }
 
 function buildAnswerKeyHtml(a){
   const totalMarks = a.questions.reduce((s,q)=>s+(Number(q.marks)||0),0);
+  const sections = cbseSections(a.questions);
   return `<div class="print-paper">
     <h1>${escapeHtml(a.title)} — Answer Key</h1>
     <div class="print-meta">${boardLabel(a.board)} &middot; Class ${a.class} &middot; ${escapeHtml(a.subject)} &middot; ${escapeHtml(a.chapter)}</div>
     <div class="print-meta">Total Marks: ${totalMarks} &middot; Teacher reference only — not for distribution to students</div>
     <hr>
-    <ol class="print-questions">
-      ${a.questions.map(q=>`<li>
-        <div class="print-q-text">${escapeHtml(q.text)} <span class="print-marks">[${q.marks} mark${q.marks===1?'':'s'}]</span></div>
-        <div class="print-answer">${q.type==='mcq'
-          ? `<b>Correct answer:</b> ${String.fromCharCode(65+q.correctIndex)}. ${escapeHtml(q.options[q.correctIndex])}`
-          : `<b>Suggested answer:</b> ${escapeHtml(q.suggestedAnswer)}`}</div>
-        <div class="print-marking"><b>Marking scheme:</b> ${escapeHtml(q.markingScheme)}</div>
-        <div class="print-source">Source: ${escapeHtml(q.sourceChapter)} &middot; ${escapeHtml(q.sourceTopic)} (${boardLabel(q.sourceBoard)}, Class ${q.sourceClass})</div>
-      </li>`).join('')}
-    </ol>
+    ${sections.map(sec=>`
+      <div class="print-section-title">Section ${sec.letter} — ${escapeHtml(sec.label)}</div>
+      <ol class="print-questions" start="${sec.startNum}">
+        ${sec.questions.map(q=>`<li>
+          <div class="print-q-text">${escapeHtml(q.text)} <span class="print-marks">[${q.marks} mark${q.marks===1?'':'s'}]</span></div>
+          <div class="print-answer">${q.type==='mcq'
+            ? `<b>Correct answer:</b> ${String.fromCharCode(65+q.correctIndex)}. ${escapeHtml(q.options[q.correctIndex])}`
+            : `<b>Suggested answer:</b> ${escapeHtml(q.suggestedAnswer)}`}</div>
+          <div class="print-marking"><b>Marking scheme:</b> ${escapeHtml(q.markingScheme)}</div>
+          <div class="print-source">Source: ${escapeHtml(q.sourceChapter)} &middot; ${escapeHtml(q.sourceTopic)} (${boardLabel(q.sourceBoard)}, Class ${q.sourceClass})</div>
+        </li>`).join('')}
+      </ol>`).join('')}
   </div>`;
 }
 
