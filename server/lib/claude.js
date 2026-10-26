@@ -88,7 +88,7 @@ async function analyzeMistakesWithClaude(payload, files){
   const basis = payload.kind === 'text'
     ? `The student's typed written answer is given below — read it directly, no OCR needed:\n"""${payload.textAnswer}"""`
     : `The student's work is attached as ${payload.kind === 'document' ? 'a document' : 'photographed image(s)'}. Read it as carefully as you can.`;
-  const prompt = `You are a patient CBSE/Karnataka State Board tutor reviewing a Class ${payload.class} ${payload.subject} student's submitted work titled "${payload.title}", so you can point out mistakes and explain them in age-appropriate language the student can learn from.
+  const prompt = `You are a patient CBSE tutor reviewing a Class ${payload.class} ${payload.subject} student's submitted work titled "${payload.title}", so you can point out mistakes and explain them in age-appropriate language the student can learn from.
 ${basis}
 If the handwriting or scan is too unclear to confidently read a part of the answer, do not guess — mark that item's assessment as "uncertain" and explain what's unclear instead of inventing content.
 Respond with ONLY a single JSON object matching this exact shape, no other text, no markdown fences:

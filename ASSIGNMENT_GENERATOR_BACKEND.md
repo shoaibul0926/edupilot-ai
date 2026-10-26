@@ -34,7 +34,7 @@ Content-Type: `application/json`
 {
   "topic": "Adding like fractions",
   "chapter": "Fractions",
-  "board": "karnataka",            // or "cbse"
+  "board": "cbse",
   "class": "5",
   "subject": "Mathematics",
   "expectedLevel": {

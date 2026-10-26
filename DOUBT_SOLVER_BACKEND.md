@@ -18,14 +18,14 @@ answer as real AI output.
 
 ```jsonc
 {
-  "board": "karnataka",
+  "board": "cbse",
   "class": "5",
   "subject": "Mathematics",
   "chapter": "Chapter 4: Fractions",
   "topic": "Adding like fractions",
   "lectureId": "lec_xxxxx",
   "lectureTitle": "Introduction to Fractions",
-  "language": "English",                 // "English" | "Hindi" | "Kannada"
+  "language": "English",                 // "English" | "Hindi"
   "expectedLevel": {
     "label": "Elementary (Classes 3-5)",
     "style": "simple, clear language with everyday examples",
@@ -33,12 +33,12 @@ answer as real AI output.
   },
   "groundingSources": {
     "transcript": "",                    // empty string if none captured yet
-    "referenceNotes": "Refer to KTBS Mathematics Class 5, Chapter 4...",
+    "referenceNotes": "Refer to NCERT Mathematics Class 5, Chapter 4...",
     "description": "A beginner-friendly walkthrough of what fractions represent...",
     "objectives": "Understand what a fraction represents\nAdd two fractions with the same denominator"
   },
   "curriculumContext": [
-    { "board": "karnataka", "class": "5", "subject": "Mathematics", "chapter": "Chapter 4: Fractions", "topic": "Adding like fractions", "year": "2026-27" }
+    { "board": "cbse", "class": "5", "subject": "Mathematics", "chapter": "Chapter 4: Fractions", "topic": "Adding like fractions", "year": "2026-27" }
   ],
   "segments": [
     { "label": "Adding fractions with the same denominator", "seconds": 165 }

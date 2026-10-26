@@ -31,7 +31,7 @@ Content-Type: `multipart/form-data`, with two parts:
 {
   "submissionId": "sub_xxxxx",
   "assignmentId": "asg_xxxxx",
-  "board": "karnataka",            // or "cbse"
+  "board": "cbse",
   "class": "5",
   "subject": "Mathematics",
   "expectedLevel": {

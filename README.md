@@ -1,6 +1,6 @@
 # EduPilot AI
 
-An AI-powered teaching assistant demo for CBSE and Karnataka State Board schools, Classes 1–10. Single static HTML file, no login — open `index.html` in a browser to run it.
+An AI-powered teaching assistant demo for CBSE schools, Classes 1–10. Single static HTML file, no login — open `index.html` in a browser to run it.
 
 **Live demo:** https://edupilot-ai-nine.vercel.app
 

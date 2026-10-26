@@ -317,7 +317,7 @@ tr:last-child td{border-bottom:none;}
 <div id="role-gate">
   <div class="role-card">
     <div class="brand"><div class="mark">EP</div><div class="name">EduPilot AI</div></div>
-    <div class="subtitle">Demonstration build — Karnataka State Board &amp; CBSE, Classes 1–10. Choose a role to preview the experience.</div>
+    <div class="subtitle">Demonstration build — CBSE, Classes 1–10. Choose a role to preview the experience.</div>
     <div class="role-options" id="role-options">
       <div class="role-opt" data-role="teacher">
         <div class="icon" id="ri-teacher"></div>
@@ -409,17 +409,14 @@ function ico(name){ return `<span class="icon">${ICONS[name]||''}</span>`; }
    CURRICULUM DATA (configurable — not an authoritative source)
 ======================================================================== */
 const CURRICULUM = {
-  karnataka: { label:'Karnataka State Board', mediums:['English Medium','Kannada Medium'] },
   cbse: { label:'CBSE', mediums:['English Medium','Hindi Medium'] },
 };
-const EXPLANATION_LANGUAGES = ['English','Hindi','Kannada'];
+const EXPLANATION_LANGUAGES = ['English','Hindi'];
 const ACADEMIC_YEARS = ['2024-25','2025-26','2026-27','2027-28'];
 const DEFAULT_ACADEMIC_YEAR = '2026-27';
 const CLASS_LIST = [1,2,3,4,5,6,7,8,9,10];
-/* Reference Library (Phase 8) is scoped to CBSE only, per current platform
-   scope — new resources are not tagged to any other board. Pre-existing
-   library records from earlier phases may still carry a different board;
-   those are left as-is rather than deleted or silently reassigned. */
+/* Reference Library (Phase 8) is scoped to CBSE, the platform's only
+   supported board. */
 const RESOURCE_TYPES = ['Textbook','Workbook','Video Lecture','Worksheet','Question Bank','Article','Other'];
 
 /* Returns every subject that appears anywhere across Classes 1-10 for the
@@ -428,16 +425,15 @@ const RESOURCE_TYPES = ['Textbook','Workbook','Video Lecture','Worksheet','Quest
    a fixed per-class subset (the Class 1-10 split was just a configurable
    default, never an official constraint). */
 function subjectsForClass(board, cls){
-  const langSubject = board === 'karnataka' ? 'Kannada' : 'Hindi';
-  return ['English', langSubject, 'Mathematics', 'Environmental Studies', 'Science', 'Social Science'];
+  return ['English', 'Hindi', 'Mathematics', 'Environmental Studies', 'Science', 'Social Science'];
 }
 function boardLabel(b){ return (CURRICULUM[b] && CURRICULUM[b].label) || b; }
 
 /* Illustrative chapter progression per subject, three chapters per class,
    ordered Class 1 -> Class 10. This is a configurable sample sequence for
    browsing — like the rest of this app's curriculum data, it has NOT been
-   verified against official Karnataka State Board or CBSE syllabus
-   documents. Subjects that are not typically taught at a given class
+   verified against official CBSE syllabus documents. Subjects that are
+   not typically taught at a given class
    (e.g. Science before Class 6) simply have no entry for that class. */
 const CHAPTER_BANK = {
   English: [
@@ -451,18 +447,6 @@ const CHAPTER_BANK = {
     ['Grammar: Active and Passive Voice','Article and Report Writing','Literature: Novel Study'],
     ['Grammar: Determiners and Modals','Formal Letter and Application Writing','Literature: Prose and Drama'],
     ['Grammar: Editing and Omission','Analytical Paragraph Writing','Literature: Prescribed Novel and Poems'],
-  ],
-  Kannada: [
-    ['Kannada Alphabets (Varnamale)','Simple Words and Pictures','Rhymes (Padyagalu)'],
-    ['Reading Short Sentences','Basic Grammar: Nouns','Simple Stories'],
-    ['Grammar: Verbs','Comprehension Passages','Letter Writing Basics'],
-    ['Grammar: Sandhi Basics','Story and Poem Appreciation','Composition Writing'],
-    ['Grammar: Vibhakti (Case Forms)','Essay Writing','Folk Tales'],
-    ['Prose and Poetry Appreciation','Grammar in Depth','Letter and Application Writing'],
-    ['Classical and Modern Poetry','Grammar: Samasa Basics','Short Story Analysis'],
-    ['Grammar: Alankara Basics','Drama and Prose Study','Report Writing'],
-    ['Grammar: Advanced Vibhakti and Samasa','Literature: Prescribed Prose and Poetry','Essay and Letter Writing'],
-    ['Grammar: Comprehensive Review','Literature: Prescribed Novel and Poems','Creative and Analytical Writing'],
   ],
   Hindi: [
     ['Hindi Varnamala (Alphabet)','Simple Words and Pictures','Poems (Kavita)'],
@@ -510,7 +494,7 @@ const CHAPTER_BANK = {
     10: ["India's Freedom Struggle",'Nationalism and Globalization','Power Sharing and Political Parties'],
   },
 };
-const SUBJECT_DISPLAY_ORDER = ['English','Kannada','Hindi','Mathematics','Environmental Studies','Science','Social Science'];
+const SUBJECT_DISPLAY_ORDER = ['English','Hindi','Mathematics','Environmental Studies','Science','Social Science'];
 
 function getChaptersForSubjectClass(subject, cls){
   const bank = CHAPTER_BANK[subject]; if(!bank) return null;
@@ -682,10 +666,10 @@ function seedData(){
   ];
 
   const library = [
-    {id:uid('lib'), title:'Karnataka Textbook Society Mathematics — Class 5', author:'KTBS', board:'karnataka', class:'5', subject:'Mathematics', link:'https://ktbs.kar.nic.in/'},
+    {id:uid('lib'), title:'NCERT Mathematics — Class 5', author:'NCERT', board:'cbse', class:'5', subject:'Mathematics', link:'https://ncert.nic.in/'},
     {id:uid('lib'), title:'NCERT Mathematics — Class 7', author:'NCERT', board:'cbse', class:'7', subject:'Mathematics', link:'https://ncert.nic.in/'},
     {id:uid('lib'), title:'NCERT Science — Class 10', author:'NCERT', board:'cbse', class:'10', subject:'Science', link:'https://ncert.nic.in/'},
-    {id:uid('lib'), title:'Karnataka Textbook Society Science — Class 8', author:'KTBS', board:'karnataka', class:'8', subject:'Science', link:'https://ktbs.kar.nic.in/'},
+    {id:uid('lib'), title:'NCERT Science — Class 8', author:'NCERT', board:'cbse', class:'8', subject:'Science', link:'https://ncert.nic.in/'},
     {id:uid('lib'), title:'NCERT Social Science — Class 9', author:'NCERT', board:'cbse', class:'9', subject:'Social Science', link:'https://ncert.nic.in/'},
   ];
 
@@ -961,11 +945,11 @@ VIEWS.overview = function(){
   const roleIntro = {
     teacher:'Here is a snapshot of your lectures, assignments and pending evaluations.',
     student:'Here is a snapshot of your lectures, results and feedback.',
-    admin:'Here is a platform-wide snapshot across both curricula.',
+    admin:'Here is a platform-wide snapshot of the curriculum.',
   }[State.role];
 
   const statCards = [
-    {label:'Lectures Uploaded', value:lectures.length, sub:'Across both boards', icon:'lectures', show:true},
+    {label:'Lectures Uploaded', value:lectures.length, sub:'CBSE curriculum', icon:'lectures', show:true},
     {label:'Assignments', value:assignments.length, sub:assignments.filter(a=>a.status==='Overdue').length+' overdue', icon:'assignments', show:true},
     {label:State.role==='student' ? 'My Average Score' : 'Students Tracked', value:State.role==='student' ? (avgScore+'%') : studentCount, sub:State.role==='student' ? 'Across evaluated work' : 'Demo roster', icon:'performance', show:true},
     {label:'Pending Submissions', value:pending, sub:'Awaiting evaluation', icon:'submissions', show:isTeacherOrAdmin()},
@@ -1041,14 +1025,14 @@ PAGE_INIT.overview = function(){
 /* ========================================================================
    CURRICULUM
 ======================================================================== */
-const CurriculumMapState = { board:'karnataka', expanded:new Set([1]) };
+const CurriculumMapState = { board:'cbse', expanded:new Set([1]) };
 
 VIEWS.curriculum = function(){
   const entries = load(SK.curriculum, []);
   return `
     <div class="section-title">Curriculum Metadata</div>
     <div class="section-sub">Manage board, class, subject, chapter/unit, topic and academic year records used across the platform.</div>
-    <div class="info-banner">${ico('curriculum')}<div>This is a configurable sample curriculum map for demonstration. It has <b>not</b> been verified against the official Karnataka State Board or CBSE syllabus documents.</div></div>
+    <div class="info-banner">${ico('curriculum')}<div>This is a configurable sample curriculum map for demonstration. It has <b>not</b> been verified against the official CBSE syllabus documents.</div></div>
 
     <div class="card" style="margin-bottom:20px;">
       <div class="card-head"><h3>Curriculum Map <span class="demo-label">Illustrative</span></h3></div>
@@ -1062,7 +1046,7 @@ VIEWS.curriculum = function(){
       <form id="curriculum-form">
         <input type="hidden" name="id">
         <div class="field-row">
-          <div class="field"><label>Board</label><select name="board" required>${boardOptions('karnataka')}</select></div>
+          <div class="field"><label>Board</label><select name="board" required>${boardOptions('cbse')}</select></div>
           <div class="field"><label>Class</label><select name="class" required>${classOptions(5)}</select></div>
           <div class="field"><label>Academic Year</label><select name="year">${yearOptions()}</select></div>
         </div>
@@ -1109,12 +1093,7 @@ function wireCurriculumMapControls(){
 
 function renderCurriculumMap(){
   const box = $('#cur-map-classes'); if(!box) return;
-  const board = CurriculumMapState.board;
-  const subjects = SUBJECT_DISPLAY_ORDER.filter(s=>{
-    if(s==='Kannada') return board==='karnataka';
-    if(s==='Hindi') return board==='cbse';
-    return true;
-  });
+  const subjects = SUBJECT_DISPLAY_ORDER;
   box.innerHTML = CLASS_LIST.map(cls=>{
     const expanded = CurriculumMapState.expanded.has(cls);
     const subjectsHtml = subjects.map(subject=>{
@@ -1239,7 +1218,7 @@ VIEWS.lectures = function(){
         <div class="field"><label>Lecture Title</label><input type="text" name="title" required placeholder="e.g. Introduction to Fractions"></div>
         <div class="field"><label>Description <span class="hint" style="font-weight:400;">(optional)</span></label><textarea name="description" placeholder="A short description of what this lecture covers..."></textarea></div>
         <div class="field-row">
-          <div class="field"><label>Board</label><select name="board" required>${boardOptions('karnataka')}</select></div>
+          <div class="field"><label>Board</label><select name="board" required>${boardOptions('cbse')}</select></div>
           <div class="field"><label>Class</label><select name="class" required>${classOptions(5)}</select></div>
           <div class="field"><label>Subject</label><select name="subject" required></select></div>
           <div class="field"><label>Academic Year</label><select name="year">${yearOptions()}</select></div>
@@ -1257,7 +1236,7 @@ VIEWS.lectures = function(){
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
             <div>
               <div style="font-weight:650;font-size:13px;">Step 1 — Find a lecture video</div>
-              <div class="hint">Opens a YouTube search for this chapter &amp; topic in a new tab — Indian channels, any language (Hindi, Kannada, English and more).</div>
+              <div class="hint">Opens a YouTube search for this chapter &amp; topic in a new tab — Indian channels, any language (Hindi, English and more).</div>
             </div>
             <button type="button" class="btn" id="lec-find-btn">${ico('search')} Find on YouTube</button>
           </div>
@@ -1271,7 +1250,7 @@ VIEWS.lectures = function(){
         <div id="lec-preview"></div>
 
         <div class="field" style="margin-top:14px;"><label>Learning Objectives <span class="hint" style="font-weight:400;">(one per line, optional)</span></label><textarea name="objectives" placeholder="e.g.&#10;Understand what a fraction represents&#10;Add two fractions with the same denominator"></textarea></div>
-        <div class="field"><label>Reference Notes <span class="hint" style="font-weight:400;">(optional)</span></label><textarea name="referenceNotes" placeholder="e.g. Refer to KTBS Mathematics Class 5, Chapter 4 for extra practice."></textarea></div>
+        <div class="field"><label>Reference Notes <span class="hint" style="font-weight:400;">(optional)</span></label><textarea name="referenceNotes" placeholder="e.g. Refer to NCERT Mathematics Class 5, Chapter 4 for extra practice."></textarea></div>
 
         <div class="field">
           <label>Timestamped Segments <span class="hint" style="font-weight:400;">(optional — lets the AI Doubt Solver link an answer to a specific moment and open the video there)</span></label>
@@ -1585,7 +1564,7 @@ VIEWS.assignments = function(){
         <input type="hidden" name="id">
         <div class="field"><label>Assignment Title</label><input type="text" name="title" required placeholder="e.g. Fractions Worksheet 1"></div>
         <div class="field-row">
-          <div class="field"><label>Board</label><select name="board" required>${boardOptions('karnataka')}</select></div>
+          <div class="field"><label>Board</label><select name="board" required>${boardOptions('cbse')}</select></div>
           <div class="field"><label>Class</label><select name="class" required>${classOptions(5)}</select></div>
           <div class="field"><label>Subject</label><select name="subject" required></select></div>
         </div>
@@ -1725,8 +1704,8 @@ PAGE_INIT.assignments = function(){
      notes, description or learning objectives — never from the YouTube URL
      alone, which is not assumed to carry any accessible text.
    - Multiple-choice distractors are only ever pulled from other lectures of
-     the SAME board and subject, so Karnataka State Board and CBSE content
-     are never silently mixed into one question.
+     the SAME board and subject, so content from a different board is never
+     silently mixed into one question.
    - Every question stores its source lecture, chapter, topic, board and
      class, so provenance is always visible and auditable.
 
@@ -1811,7 +1790,7 @@ function getLectureContentSources(lecture){
 }
 
 /* Distractors only ever come from other lectures sharing the same board and
-   subject, so a question never mixes Karnataka State Board and CBSE content. */
+   subject, so a question never mixes content from different boards. */
 function getDistractorPool(board, subject, excludeLectureId){
   const lectures = load(SK.lectures, []).filter(l=>l.board===board && l.subject===subject && l.id!==excludeLectureId);
   const pool = [];
@@ -3888,15 +3867,10 @@ const DOUBT_SAMPLES = {
     {k:['fraction','भिन्न'], a:'भिन्न किसी पूर्ण संख्या के भाग को दर्शाती है। समान हर वाली भिन्नों को जोड़ने के लिए, अंशों को जोड़ें और हर को वैसे ही रखें। (डेमो उत्तर)'},
     {k:['force','pressure','बल'], a:'बल किसी वस्तु पर लगाया गया धक्का या खिंचाव है। दबाव किसी क्षेत्र पर लगने वाला बल है। (डेमो उत्तर)'},
   ],
-  Kannada: [
-    {k:['fraction','ಭಿನ್ನರಾಶಿ'], a:'ಭಿನ್ನರಾಶಿ ಎಂದರೆ ಒಂದು ಪೂರ್ಣದ ಭಾಗ. ಒಂದೇ ಛೇದವಿರುವ ಭಿನ್ನರಾಶಿಗಳನ್ನು ಸೇರಿಸಲು, ಅಂಶಗಳನ್ನು ಸೇರಿಸಿ, ಛೇದ ಬದಲಾಗುವುದಿಲ್ಲ. (ಡೆಮೊ ಉತ್ತರ)'},
-    {k:['force','ಬಲ'], a:'ಬಲ ಎಂದರೆ ಒಂದು ವಸ್ತುವಿನ ಮೇಲೆ ತಳ್ಳುವ ಅಥವಾ ಎಳೆಯುವ ಕ್ರಿಯೆ. (ಡೆಮೊ ಉತ್ತರ)'},
-  ],
 };
 const DOUBT_FALLBACK = {
   English:'This is a demo response, not grounded in any specific lecture. In the full product, this would be answered by a real AI model using your selected lecture\'s content.',
   Hindi:'यह एक डेमो उत्तर है, किसी विशेष लेक्चर पर आधारित नहीं। पूर्ण उत्पाद में, यह आपके चयनित लेक्चर की सामग्री का उपयोग करके एक वास्तविक AI मॉडल द्वारा उत्तरित किया जाएगा।',
-  Kannada:'ಇದು ಡೆಮೊ ಪ್ರತಿಕ್ರಿಯೆ, ಯಾವುದೇ ನಿರ್ದಿಷ್ಟ ಉಪನ್ಯಾಸವನ್ನು ಆಧರಿಸಿಲ್ಲ. ಪೂರ್ಣ ಉತ್ಪನ್ನದಲ್ಲಿ, ಇದನ್ನು ನಿಮ್ಮ ಆಯ್ಕೆಮಾಡಿದ ಉಪನ್ಯಾಸದ ವಿಷಯವನ್ನು ಬಳಸಿಕೊಂಡು ನಿಜವಾದ AI ಮಾದರಿಯಿಂದ ಉತ್ತರಿಸಲಾಗುತ್ತದೆ.',
 };
 function getDoubtResponse(text, lang){
   const samples = DOUBT_SAMPLES[lang] || DOUBT_SAMPLES.English;
@@ -3917,7 +3891,7 @@ const UNSAFE_PATTERNS = [
 ];
 function isQuestionSafe(text){ return !UNSAFE_PATTERNS.some(p=>p.test(text)); }
 
-const DoubtState = { board:'karnataka', class:'5', subject:'', lectureId:'' };
+const DoubtState = { board:'cbse', class:'5', subject:'', lectureId:'' };
 
 function chatKey(lectureId, lang){ return SK.chat+(lectureId||'general')+'_'+lang; }
 
@@ -4157,7 +4131,7 @@ VIEWS.library = function(){
   return `
     <div class="section-title">Reference Library</div>
     <div class="section-sub">${canEdit?'Organize, compare and reuse reference resources for CBSE Classes 1–10.':'Browse reference resources for your subjects.'}</div>
-    <div class="info-banner">${ico('shield')}<div>All data here is stored only in this browser's localStorage — it is not shared between devices or teachers, and is lost if browser storage is cleared. New resources are scoped to CBSE only; records from earlier demo phases for other boards remain visible but unchanged. "Verified" means <b>you</b> confirmed the syllabus alignment yourself — this app never checks an official syllabus or reads a book's actual content on its own.</div></div>
+    <div class="info-banner">${ico('shield')}<div>All data here is stored only in this browser's localStorage — it is not shared between devices or teachers, and is lost if browser storage is cleared. Resources are scoped to CBSE, the platform's only supported board. "Verified" means <b>you</b> confirmed the syllabus alignment yourself — this app never checks an official syllabus or reads a book's actual content on its own.</div></div>
 
     ${canEdit?`
     <div class="card" style="margin:20px 0;">
@@ -4707,7 +4681,7 @@ VIEWS.settings = function(){
         <li>Per-student performance evidence and AI-suggested feedback are computed from this demo's own submission records; the demo role switch is not a real access-control boundary — a real backend must authorize which students a given teacher may view, <b>and</b> verify a student's own identity before showing them anything (see EVALUATION_BACKEND.md). The "Who are you?" picker on the student side is a demo stand-in for login, not authentication.</li>
         <li>The Reference Library's resource comparison (Phase 8) is a rule-based heuristic over the metadata and notes a teacher enters — it never reads a book's actual content, and depth/clarity/difficulty assessments shown there are literally the teacher's own notes, not an AI judgment.</li>
         <li>The Reference Library's "Check Link" feature can only report whether a browser request to a URL succeeded or failed — cross-origin restrictions mean it cannot read the page's real HTTP status or confirm the content actually loaded correctly.</li>
-        <li>New Reference Library resources are scoped to CBSE only; records added in earlier demo phases for other boards remain visible but are not reclassified.</li>
+        <li>Reference Library resources are scoped to CBSE, the platform's only supported board.</li>
         <li>The AI Resource Finder integration opens genuine YouTube/Google searches built from curriculum fields — it never fabricates a resource; a teacher still has to find, open and confirm the actual resource before saving its real title and link.</li>
         <li>All data is stored in this browser's localStorage and is not shared between devices or teachers — a real multi-user deployment needs server-side storage with per-teacher accounts and access control, not just a larger browser quota.</li>
       </ul>

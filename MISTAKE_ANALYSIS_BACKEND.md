@@ -32,7 +32,7 @@ Content-Type: `multipart/form-data`:
 // payload (stringified JSON)
 {
   "title": "My Essay on Water Cycle",
-  "board": "cbse",             // or "karnataka"
+  "board": "cbse",
   "class": "5",
   "subject": "English",
   "kind": "text",               // "text" | "image" | "document"
