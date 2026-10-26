@@ -559,6 +559,18 @@ function load(key, fallback){
 function save(key, value){
   try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){ toast('Could not save demo data (storage full or unavailable).','error'); }
 }
+/* Role is kept in sessionStorage, not localStorage: localStorage is shared
+   by every window/tab of this browser profile, but each window should be
+   able to stay on its own role (e.g. a teacher window and a student window
+   open side by side) without one window's role choice flipping the other
+   on refresh. All other demo data stays in localStorage so it keeps
+   syncing between windows, which is the point of the two-window demo. */
+function loadRole(){
+  try{ return sessionStorage.getItem(SK.role); }catch(e){ return null; }
+}
+function saveRole(value){
+  try{ sessionStorage.setItem(SK.role, value); }catch(e){}
+}
 
 /* ========================================================================
    UTILS
@@ -838,7 +850,7 @@ $('#role-continue-btn').addEventListener('click', function(){
   if(!pendingRole) return;
   const roleChanged = State.role !== pendingRole;
   State.role = pendingRole;
-  save(SK.role, pendingRole);
+  saveRole(pendingRole);
   if(roleChanged) State.route = routesForRole()[0].key;
   enterApp();
 });
@@ -4708,7 +4720,7 @@ PAGE_INIT.settings = function(){
   });
   $('#settings-export').addEventListener('click', function(){
     const all = {};
-    Object.keys(SK).forEach(k=>{ if(typeof SK[k]==='string') all[k] = load(SK[k], null); });
+    Object.keys(SK).forEach(k=>{ if(typeof SK[k]==='string') all[k] = (SK[k]===SK.role ? loadRole() : load(SK[k], null)); });
     const blob = new Blob([JSON.stringify(all,null,2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -4779,11 +4791,25 @@ migrateSubmissionSchema();
 migrateStudentFeedbackSchema();
 migrateAssignmentSchema();
 migrateLibrarySchema();
-const savedRole = load(SK.role, null);
+const savedRole = loadRole();
 if(savedRole){
   State.role = savedRole;
   enterApp();
 }
+
+/* Two-window live demo: when another window of this same browser profile
+   writes new demo data (a student submitting work, a teacher publishing an
+   assignment, etc.), re-render the current page so the change shows up
+   immediately here too, with no manual refresh. Skipped while the role
+   gate or a modal is open so it never yanks away an in-progress form. */
+window.addEventListener('storage', function(e){
+  if(!e.key) return;
+  const liveKeys = [SK.curriculum, SK.lectures, SK.assignments, SK.submissions, SK.library, SK.generatedAssignments, SK.studentFeedback];
+  if(!liveKeys.includes(e.key) && !e.key.startsWith(SK.chat)) return;
+  if($('#role-gate').style.display === 'flex') return;
+  if($('#modal-root').classList.contains('show')) return;
+  renderPage();
+});
 
 })();
 </script>
