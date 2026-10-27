@@ -150,4 +150,30 @@ If the request and filters are too sparse to responsibly target suggestions, fal
   return extractJson(text);
 }
 
-module.exports = { isClaudeConfigured, evaluateWithClaude, generateWithClaude, generateLessonPlanWithClaude, analyzeMistakesWithClaude, discoverResourcesWithClaude };
+/* Phase 16: free-form "other teaching materials" — revision notes,
+ * flashcards, study guides, rubrics, vocabulary lists, anything that isn't
+ * a lesson plan, worksheet or question paper. Deliberately generic
+ * (title + sections) so one endpoint covers all of these without a
+ * separate schema per material type.
+ */
+async function generateOtherMaterialWithClaude(body) {
+  const anthropic = client();
+  const prompt = `Generate a "${body.materialType || 'teaching material'}" for a classroom, grounded ONLY in the lecture content given below — never invent facts the lecture content doesn't contain. Respond with ONLY a single JSON object, no other text, no markdown fences:
+{"title":"...","sections":[{"heading":"...","content":"..."}]}
+
+Lecture topic: ${body.topic}. Chapter: ${body.chapter}. Board: ${body.board}. Class: ${body.class}. Subject: ${body.subject}.
+Expected class level: ${body.expectedLevel && body.expectedLevel.label} (${body.expectedLevel && body.expectedLevel.style}).
+Teacher's description of what they need: "${body.description || '(none given — use your judgment for this material type)'}"
+Lecture content to generate from (objectives / reference notes / description / transcript — use only this):
+${JSON.stringify(body.groundingSources || {}, null, 2)}
+Choose a sensible number of sections for a "${body.materialType || 'teaching material'}" (e.g. one card per section for flashcards, one topic per section for revision notes, one criterion per section for a rubric). If the lecture content above is too sparse to responsibly generate this, generate fewer sections rather than inventing content.`;
+  const msg = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+  return extractJson(text);
+}
+
+module.exports = { isClaudeConfigured, evaluateWithClaude, generateWithClaude, generateLessonPlanWithClaude, analyzeMistakesWithClaude, discoverResourcesWithClaude, generateOtherMaterialWithClaude };

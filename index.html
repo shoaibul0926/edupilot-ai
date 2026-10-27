@@ -533,6 +533,8 @@ const SK = {
   generatedLessonPlans:'edupilot_generatedLessonPlans',
   lessonPlanBackendUrl:'edupilot_lessonPlanBackendUrl',
   resourceDiscoveryBackendUrl:'edupilot_resourceDiscoveryBackendUrl',
+  generatedOtherMaterials:'edupilot_generatedOtherMaterials',
+  otherMaterialBackendUrl:'edupilot_otherMaterialBackendUrl',
 };
 function load(key, fallback){
   try{
@@ -799,6 +801,7 @@ const ROUTES = [
   {key:'assignments', label:'Assignments', icon:'assignments'},
   {key:'generator', label:'Assignment Generator', icon:'generator'},
   {key:'lessonplans', label:'Lesson Plans', icon:'generator'},
+  {key:'othermaterials', label:'Other Materials', icon:'generator'},
   {key:'submissions', label:'Student Submissions', icon:'submissions'},
   {key:'performance', label:'Performance & Feedback', icon:'performance'},
   {key:'library', label:'Reference Library', icon:'library'},
@@ -2839,6 +2842,341 @@ PAGE_INIT.lessonplans = function(){
   });
 
   renderLpList();
+};
+
+/* ========================================================================
+   OTHER TEACHING MATERIALS (Phase 16)
+   Closes the open-ended part of "lesson plans, worksheets, question papers,
+   and other teaching-related materials" — the three named types already
+   have dedicated generators (Assignment Generator, Lesson Plans); this is
+   the free-form one for everything else a teacher might ask for (revision
+   notes, flashcards, a study guide, a rubric, a vocabulary list...).
+   Same real-backend/demo-fallback shape as Lesson Plans (see
+   OTHER_MATERIALS_BACKEND.md): a material is just a title plus a list of
+   {heading, content} sections — generic enough to cover any of the above
+   without a separate schema per material type.
+======================================================================== */
+const OtherMaterialState = { openMaterialId:null };
+const MATERIAL_TYPE_PRESETS = ['Revision Notes','Flashcards','Study Guide','Activity Sheet','Rubric','Vocabulary List','Other'];
+
+const AIOtherMaterialService = {
+  isConfigured(){ return !!(load(SK.otherMaterialBackendUrl,'')||'').trim(); },
+  async generate(lecture, materialType, description, sources, band){
+    const endpoint = (load(SK.otherMaterialBackendUrl,'')||'').trim();
+    if(endpoint){
+      try{
+        const res = await fetch(endpoint, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            materialType, description,
+            topic:lecture.topic, chapter:lecture.chapter, board:lecture.board, class:lecture.class, subject:lecture.subject,
+            expectedLevel:{label:band.label, style:band.style, answerLength:band.answerLength},
+            groundingSources:{objectives:sources.objectives.join('\n'), referenceNotes:sources.notes, description:sources.description, transcript:sources.transcript},
+          }),
+        });
+        if(res.ok){
+          const data = await res.json();
+          if(data && Array.isArray(data.sections)) return {...data, generatedBy:'real-backend'};
+          toast('Other-materials backend response was missing a sections array — used the built-in demo template instead.','error');
+        } else {
+          const text = await res.text().catch(()=>'');
+          toast(`Other-materials backend returned HTTP ${res.status}${text?': '+text:''} — used the built-in demo template instead.`,'error');
+        }
+      } catch(err){
+        toast('Could not reach the other-materials backend — used the built-in demo template instead.','error');
+      }
+    }
+    return {...mockGenerateOtherMaterial(lecture, materialType, description, sources), generatedBy:'demo-mock-ai'};
+  },
+};
+
+function mockGenerateOtherMaterial(lecture, materialType, description, sources){
+  const objectives = sources.objectives.length ? sources.objectives : [lecture.topic];
+  const sections = objectives.map((o,i)=>({heading:`${materialType||'Material'} point ${i+1}`, content:o}));
+  sections.push({
+    heading:'About this draft',
+    content: description
+      ? `A real AI backend would tailor this to your request ("${description}"). This built-in demo template only lists the lecture's own objectives above — configure a backend on Settings for a genuinely custom result.`
+      : `This built-in demo template lists the lecture's own objectives above. Configure a backend on Settings, or add a description of what you need, for a more tailored result.`,
+  });
+  return { title: `${lecture.topic} — ${materialType||'Teaching Material'}`, sections };
+}
+
+VIEWS.othermaterials = function(){
+  if(!isTeacherOrAdmin()){
+    return `
+      <div class="section-title">Other Materials</div>
+      <div class="section-sub">Generate revision notes, flashcards, study guides and other teaching material from a lecture's existing content.</div>
+      <div class="info-banner">${ico('shield')}<div>This tool is available to teachers.</div></div>`;
+  }
+  const lectures = load(SK.lectures, []);
+  const omConfigured = AIOtherMaterialService.isConfigured();
+  return `
+    <div class="section-title">Other Materials <span class="demo-label">${omConfigured?'Real AI backend configured':'Demo mock AI'}</span></div>
+    <div class="section-sub">Beyond lesson plans, worksheets and question papers — revision notes, flashcards, study guides, rubrics and more, generated from a lecture's own content. The YouTube link itself is never used as content.</div>
+    ${omConfigured?'':`<div class="info-banner">${ico('shield')}<div>No Other Materials Backend is configured (Settings) — the draft below is produced by a deterministic, template-based demo generator, not a live AI model. See <code>OTHER_MATERIALS_BACKEND.md</code>.</div></div>`}
+
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Step 1 — Select a Lecture</h3></div>
+      ${!lectures.length ? emptyState('generator','No lectures yet. Add one on the Lectures page first.') : `
+      <div class="field">
+        <label>Lecture</label>
+        <select id="om-lecture-select">
+          <option value="">Select a lecture...</option>
+          ${lectures.map(l=>`<option value="${l.id}">${escapeHtml(l.title)} — ${boardLabel(l.board)} · Class ${l.class} · ${escapeHtml(l.subject)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="om-content-check"></div>`}
+    </div>
+
+    <div id="om-draft-card"></div>
+
+    <div class="card">
+      <div class="card-head"><h3>Generated Materials</h3></div>
+      <div id="om-list-wrap"></div>
+    </div>`;
+};
+
+function renderOmContentCheck(lecture){
+  const box = $('#om-content-check'); if(!box) return;
+  if(!lecture){ box.innerHTML=''; return; }
+  const s = getLectureContentSources(lecture);
+  const row = (label, ok, extra)=>`<div style="display:flex;align-items:center;gap:8px;">
+    <span class="pill ${ok?'pill-evaluated':'pill-neutral'}">${ok?'Available':'Not provided'}</span>
+    <span style="font-size:12.5px;color:var(--text-600);">${label}${extra?' ('+extra+')':''}</span>
+  </div>`;
+  box.innerHTML = `
+    <div class="card" style="background:var(--bg);margin-top:4px;">
+      <div style="font-weight:650;font-size:13px;margin-bottom:8px;">Content available for generation</div>
+      <div style="display:grid;gap:6px;">
+        ${row('Learning objectives', s.hasObjectives, s.objectives.length+' entries')}
+        ${row('Reference notes', s.hasNotes)}
+        ${row('Description', s.hasDescription)}
+        ${row('Transcript', s.hasTranscript)}
+      </div>
+      <p class="hint" style="margin-top:8px;">The YouTube link itself is never treated as content — only the fields above are used.</p>
+      ${!s.sufficient
+        ? `<div class="info-banner" style="margin-top:10px;margin-bottom:0;">${ico('shield')}<div><b>Not enough content yet.</b> Add learning objectives, reference notes or a description to this lecture on the Lectures page before generating a material.</div></div>`
+        : `<div class="field" style="margin-top:12px;"><label>Material Type</label><select id="om-material-type">${MATERIAL_TYPE_PRESETS.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
+           <div class="field"><label>Describe what you need <span class="hint" style="font-weight:400;">(optional)</span></label><textarea id="om-description" rows="2" placeholder="e.g. One-page revision sheet covering the whole chapter, with a short practice section at the end"></textarea></div>
+           <button type="button" class="btn btn-primary" id="om-generate-btn">${ico('plus')} Generate Material${AIOtherMaterialService.isConfigured()?'':' (Demo)'}</button>`}
+    </div>`;
+  if(s.sufficient) $('#om-generate-btn').addEventListener('click', ()=>handleGenerateOtherMaterial(lecture));
+}
+
+async function handleGenerateOtherMaterial(lecture){
+  const btn = $('#om-generate-btn');
+  const materialType = $('#om-material-type')?.value || 'Other';
+  const description = ($('#om-description')?.value||'').trim();
+  const usingRealBackend = AIOtherMaterialService.isConfigured();
+  btn.disabled = true; btn.textContent = usingRealBackend ? 'Generating material...' : 'Generating demo material...';
+  const band = getClassBand(lecture.class);
+  const sources = getLectureContentSources(lecture);
+  const result = await AIOtherMaterialService.generate(lecture, materialType, description, sources, band);
+  btn.disabled = false; btn.innerHTML = `${ico('plus')} Generate Material${usingRealBackend?'':' (Demo)'}`;
+
+  const record = {
+    id:uid('othermat'), lectureId:lecture.id, materialType,
+    title:result.title || `${lecture.topic} — ${materialType}`,
+    board:lecture.board, class:lecture.class, subject:lecture.subject, chapter:lecture.chapter, topic:lecture.topic, year:lecture.year||DEFAULT_ACADEMIC_YEAR,
+    sections:result.sections||[], generatedBy:result.generatedBy||'demo-mock-ai',
+    createdAt:new Date().toISOString(), updatedAt:new Date().toISOString(),
+  };
+  const all = load(SK.generatedOtherMaterials, []);
+  all.push(record);
+  save(SK.generatedOtherMaterials, all);
+  OtherMaterialState.openMaterialId = record.id;
+  toast(record.generatedBy==='real-backend' ? 'Material generated.' : 'Demo material generated — review before using.','success');
+  renderOmDraftCard();
+  renderOmList();
+  $('#om-draft-card').scrollIntoView({behavior:'smooth'});
+}
+
+function renderOmDraftCard(){
+  const box = $('#om-draft-card'); if(!box) return;
+  const id = OtherMaterialState.openMaterialId;
+  if(!id){ box.innerHTML=''; return; }
+  const all = load(SK.generatedOtherMaterials, []);
+  const m = all.find(x=>x.id===id);
+  if(!m){ box.innerHTML=''; OtherMaterialState.openMaterialId=null; return; }
+  box.innerHTML = `
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head">
+        <div>
+          <h3>Draft ${escapeHtml(m.materialType||'Material')}</h3>
+          <div class="hint">${boardLabel(m.board)} · Class ${m.class} · ${escapeHtml(m.subject)} · ${escapeHtml(m.chapter)} · ${escapeHtml(m.topic)}</div>
+        </div>
+      </div>
+      <div class="info-banner">${ico('doubt')}<div>This material was generated by a <b>${m.generatedBy==='real-backend'?'real AI backend':'demo mock AI'}</b> from this lecture's own content — review and edit before use in class.</div></div>
+      <div class="field"><label>Title</label><input type="text" id="om-draft-title" value="${escapeHtml(m.title)}"></div>
+
+      <div style="font-weight:650;font-size:13px;margin:14px 0 8px;">Sections</div>
+      <div id="om-sections-list" style="display:flex;flex-direction:column;gap:10px;">
+        ${(m.sections||[]).length ? m.sections.map((sec,idx)=>`<div class="card" data-sec-idx="${idx}" style="background:var(--bg);">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;">
+            <span class="meta-chip">Section ${idx+1}</span>
+            <button type="button" class="btn btn-icon btn-ghost om-sec-delete" data-idx="${idx}" title="Remove section" aria-label="Remove section">${ico('trash')}</button>
+          </div>
+          <div class="field"><label>Heading</label><input type="text" class="om-sec-heading" data-idx="${idx}" value="${escapeHtml(sec.heading||'')}"></div>
+          <div class="field"><label>Content</label><textarea class="om-sec-content" data-idx="${idx}" rows="3">${escapeHtml(sec.content||'')}</textarea></div>
+        </div>`).join('') : '<p class="hint">No sections left. Regenerate or add one manually.</p>'}
+      </div>
+      <button type="button" class="btn" id="om-sec-add" style="margin-top:10px;">${ico('plus')} Add Section</button>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">
+        <button type="button" class="btn btn-primary" id="om-save-changes">Save Changes</button>
+        <button type="button" class="btn" id="om-regenerate">Regenerate</button>
+        <button type="button" class="btn btn-danger" id="om-discard">Delete Draft</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+        <button type="button" class="btn" id="om-print">${ico('link')} Print Material (PDF)</button>
+      </div>
+      <p class="hint" style="margin-top:6px;">Opens your browser's print dialog — choose "Save as PDF" as the destination.</p>
+    </div>`;
+  wireOmDraftCard(m.id);
+}
+
+function wireOmDraftCard(materialId){
+  $('#om-sections-list').addEventListener('click', function(e){
+    const btn = e.target.closest('.om-sec-delete'); if(!btn) return;
+    const all = load(SK.generatedOtherMaterials, []);
+    const rec = all.find(x=>x.id===materialId); if(!rec) return;
+    rec.sections.splice(Number(btn.dataset.idx),1);
+    save(SK.generatedOtherMaterials, all);
+    renderOmDraftCard(); renderOmList();
+  });
+
+  $('#om-sec-add').addEventListener('click', function(){
+    const all = load(SK.generatedOtherMaterials, []);
+    const rec = all.find(x=>x.id===materialId); if(!rec) return;
+    rec.sections = rec.sections||[];
+    rec.sections.push({heading:'', content:''});
+    save(SK.generatedOtherMaterials, all);
+    renderOmDraftCard(); renderOmList();
+  });
+
+  $('#om-save-changes').addEventListener('click', function(){
+    const all = load(SK.generatedOtherMaterials, []);
+    const rec = all.find(x=>x.id===materialId); if(!rec) return;
+    rec.title = $('#om-draft-title').value.trim() || rec.title;
+    document.querySelectorAll('#om-sections-list [data-sec-idx]').forEach(secEl=>{
+      const idx = Number(secEl.dataset.secIdx);
+      if(!rec.sections[idx]) return;
+      rec.sections[idx].heading = secEl.querySelector('.om-sec-heading').value;
+      rec.sections[idx].content = secEl.querySelector('.om-sec-content').value;
+    });
+    rec.updatedAt = new Date().toISOString();
+    save(SK.generatedOtherMaterials, all);
+    toast('Material changes saved.','success');
+    renderOmDraftCard(); renderOmList();
+  });
+
+  $('#om-regenerate').addEventListener('click', function(){
+    confirmAction('Regenerate material?',`This replaces the current draft with a new ${AIOtherMaterialService.isConfigured()?'AI-generated':'demo-generated'} one from the same lecture content. Manual edits will be lost.`, async ()=>{
+      const all = load(SK.generatedOtherMaterials, []);
+      const rec = all.find(x=>x.id===materialId); if(!rec) return;
+      const lecture = load(SK.lectures, []).find(l=>l.id===rec.lectureId);
+      if(!lecture){ toast('Source lecture not found.','error'); return; }
+      const band = getClassBand(lecture.class);
+      const sources = getLectureContentSources(lecture);
+      const result = await AIOtherMaterialService.generate(lecture, rec.materialType, '', sources, band);
+      rec.title=result.title||rec.title; rec.sections=result.sections||[]; rec.generatedBy=result.generatedBy||'demo-mock-ai';
+      rec.updatedAt = new Date().toISOString();
+      save(SK.generatedOtherMaterials, all);
+      toast('Material regenerated.','success');
+      renderOmDraftCard(); renderOmList();
+    });
+  });
+
+  $('#om-discard').addEventListener('click', function(){
+    confirmAction('Delete this material?','This removes the generated material draft.', ()=>{
+      save(SK.generatedOtherMaterials, load(SK.generatedOtherMaterials, []).filter(x=>x.id!==materialId));
+      OtherMaterialState.openMaterialId = null;
+      toast('Material deleted.','success');
+      renderOmDraftCard(); renderOmList();
+    }, true);
+  });
+
+  $('#om-print').addEventListener('click', function(){
+    const rec = load(SK.generatedOtherMaterials, []).find(x=>x.id===materialId); if(!rec) return;
+    printOtherMaterial(rec);
+  });
+}
+
+function buildOtherMaterialHtml(m){
+  return `<div class="print-paper">
+    <h1>${escapeHtml(m.title)}</h1>
+    <div class="print-meta">${boardLabel(m.board)} &middot; Class ${m.class} &middot; ${escapeHtml(m.subject)} &middot; ${escapeHtml(m.chapter)}</div>
+    <div class="print-meta">${escapeHtml(m.materialType||'')}</div>
+    <hr>
+    ${(m.sections||[]).map(sec=>`
+      <div class="print-section-title">${escapeHtml(sec.heading||'')}</div>
+      <p>${escapeHtml(sec.content||'')}</p>`).join('')}
+  </div>`;
+}
+function printOtherMaterial(record){
+  $('#print-area').innerHTML = buildOtherMaterialHtml(record);
+  window.print();
+}
+
+function renderOmList(){
+  const wrap = $('#om-list-wrap'); if(!wrap) return;
+  const all = load(SK.generatedOtherMaterials, []).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  if(!all.length){ wrap.innerHTML = emptyState('generator','No generated materials yet.'); return; }
+  wrap.innerHTML = `<table><thead><tr><th>Title</th><th>Type</th><th>Board/Class</th><th>Subject</th><th>Sections</th><th></th></tr></thead><tbody>
+    ${all.map(m=>`<tr>
+      <td>${escapeHtml(m.title)}</td><td><span class="meta-chip">${escapeHtml(m.materialType||'Other')}</span></td><td>${boardLabel(m.board)} · Class ${m.class}</td><td>${escapeHtml(m.subject)}</td>
+      <td>${(m.sections||[]).length}</td>
+      <td class="row-actions">
+        <button class="btn btn-sm" data-action="om-open" data-id="${m.id}">Open</button>
+        <button class="btn btn-sm" data-action="om-print" data-id="${m.id}">Print</button>
+        <button class="btn btn-icon btn-ghost" data-action="om-delete" data-id="${m.id}" title="Delete" aria-label="Delete">${ico('trash')}</button>
+      </td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+PAGE_INIT.othermaterials = function(){
+  if(!isTeacherOrAdmin()) return;
+  OtherMaterialState.openMaterialId = null;
+
+  const sel = $('#om-lecture-select');
+  if(sel){
+    sel.addEventListener('change', function(){
+      OtherMaterialState.openMaterialId = null;
+      $('#om-draft-card').innerHTML = '';
+      const lecture = load(SK.lectures, []).find(l=>l.id===this.value);
+      renderOmContentCheck(lecture);
+    });
+  }
+
+  $('#om-list-wrap')?.addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action]'); if(!btn) return;
+    const id = btn.dataset.id;
+    if(btn.dataset.action==='om-open'){
+      OtherMaterialState.openMaterialId = id;
+      const rec = load(SK.generatedOtherMaterials, []).find(x=>x.id===id);
+      if(rec && sel){
+        sel.value = rec.lectureId;
+        renderOmContentCheck(load(SK.lectures, []).find(l=>l.id===rec.lectureId));
+      }
+      renderOmDraftCard();
+      $('#om-draft-card').scrollIntoView({behavior:'smooth'});
+    }
+    if(btn.dataset.action==='om-print'){
+      const rec = load(SK.generatedOtherMaterials, []).find(x=>x.id===id); if(!rec) return;
+      printOtherMaterial(rec);
+    }
+    if(btn.dataset.action==='om-delete'){
+      confirmAction('Delete generated material?','This removes the material draft.', ()=>{
+        save(SK.generatedOtherMaterials, load(SK.generatedOtherMaterials, []).filter(x=>x.id!==id));
+        if(OtherMaterialState.openMaterialId===id){ OtherMaterialState.openMaterialId=null; $('#om-draft-card').innerHTML=''; }
+        toast('Generated material deleted.','success');
+        renderOmList();
+      }, true);
+    }
+  });
+
+  renderOmList();
 };
 
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg','image/png','image/webp'];
@@ -5242,6 +5580,17 @@ VIEWS.settings = function(){
     </div>
 
     <div class="card" style="margin-top:20px;">
+      <div class="card-head"><h3>Other Materials Backend <span class="demo-label">Phase 16</span></h3></div>
+      <p class="hint" style="margin-bottom:12px;">Real AI-generated revision notes, flashcards, study guides and other free-form teaching materials, grounded only in a lecture's own objectives/notes/description/transcript, require a backend server you control, holding your own language-model provider credentials — this demo never stores or sends any API key from the browser. Point this at your backend's endpoint once you have one running; see <code>OTHER_MATERIALS_BACKEND.md</code> in the project for the exact request/response contract and security requirements. Leaving this blank keeps the built-in demo template as the only mode.</p>
+      <div class="field">
+        <label>Other Materials Backend URL</label>
+        <input type="url" id="settings-othermaterial-endpoint" placeholder="https://your-backend.example.com/api/ai/generate-material" value="${escapeHtml(load(SK.otherMaterialBackendUrl,''))}">
+      </div>
+      <p class="hint" id="settings-othermaterial-status" style="margin-bottom:12px;"></p>
+      <button class="btn btn-primary" id="settings-othermaterial-save">Save Backend URL</button>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
       <div class="card-head"><h3>Resource Discovery Backend <span class="demo-label">Phase 15</span></h3></div>
       <p class="hint" style="margin-bottom:12px;">Real AI curation for the Reference Library's "Curate with AI" tool — turning a teacher's free-text request into several targeted search suggestions — requires a backend server you control, holding your own language-model provider credentials — this demo never stores or sends any API key from the browser. Point this at your backend's endpoint once you have one running; see <code>RESOURCE_DISCOVERY_BACKEND.md</code> in the project for the exact request/response contract and security requirements. Leaving this blank keeps the built-in demo template as the only mode.</p>
       <div class="field">
@@ -5273,6 +5622,7 @@ VIEWS.settings = function(){
         <li>AI evaluation of handwritten submissions (Phase 5) only runs against a backend you configure and deploy yourself; without one, evaluation attempts fail honestly rather than producing fabricated results.</li>
         <li>Real AI question generation (Phase 9) likewise only runs against a backend you configure and deploy yourself; without one, or if that backend fails, the Assignment Generator falls back to its original deterministic demo generator and always labels which one actually produced a given draft. A reference backend implementing both this and the evaluation contract is included in <code>server/</code> — see <code>server/README.md</code>.</li>
         <li>Real AI lesson plan generation (Phase 14) follows the same pattern as the Assignment Generator — without a configured backend, or if it fails, the Lesson Plan generator falls back to a deterministic demo template and always labels which one produced a given plan. The same reference backend in <code>server/</code> implements this contract too.</li>
+        <li>Other Materials (Phase 16) covers free-form teaching materials beyond lesson plans/worksheets/question papers — revision notes, flashcards, study guides, rubrics and more — as a title plus editable sections, following the same real-backend/demo-fallback pattern as the rest of the generators.</li>
         <li>AI Mistake Analysis (Phase 13) is a student-triggered, open-ended explanation of a submission's own mistakes — it is informational only, never an official score, and only runs against a backend you configure; without one it reports this honestly instead of fabricating an analysis. Word documents (DOC/DOCX) are not analyzed — only PDFs, photos and typed answers — since reliable text extraction from DOC/DOCX needs a library this project does not bundle.</li>
         <li>Per-student performance evidence and AI-suggested feedback are computed from this demo's own submission records; the demo role switch is not a real access-control boundary — a real backend must authorize which students a given teacher may view, <b>and</b> verify a student's own identity before showing them anything (see EVALUATION_BACKEND.md). The "Who are you?" picker on the student side is a demo stand-in for login, not authentication.</li>
         <li>The Reference Library's resource comparison (Phase 8) is a rule-based heuristic over the metadata and notes a teacher enters — it never reads a book's actual content, and depth/clarity/difficulty assessments shown there are literally the teacher's own notes, not an AI judgment.</li>
@@ -5349,6 +5699,19 @@ PAGE_INIT.settings = function(){
     save(SK.lessonPlanBackendUrl, val);
     refreshLessonPlanStatus();
     toast(val?'Lesson plan backend URL saved.':'Lesson plan backend cleared.','success');
+  });
+
+  const otherMaterialStatusEl = $('#settings-othermaterial-status');
+  const refreshOtherMaterialStatus = ()=>{
+    const url = load(SK.otherMaterialBackendUrl,'');
+    otherMaterialStatusEl.textContent = url ? `Configured: ${url}` : 'Not configured — Other Materials will use its built-in demo template instead.';
+  };
+  refreshOtherMaterialStatus();
+  $('#settings-othermaterial-save').addEventListener('click', function(){
+    const val = $('#settings-othermaterial-endpoint').value.trim();
+    save(SK.otherMaterialBackendUrl, val);
+    refreshOtherMaterialStatus();
+    toast(val?'Other materials backend URL saved.':'Other materials backend cleared.','success');
   });
 
   const resourceDiscoveryStatusEl = $('#settings-resourcediscovery-status');

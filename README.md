@@ -4,7 +4,7 @@ An AI-powered teaching assistant demo for CBSE schools, Classes 1–10. Single s
 
 **Live demo:** https://edupilot-ai-nine.vercel.app
 
-Covers: AI-curated resource discovery, assignment/question-paper generation, lesson plan generation, handwritten submission uploads, AI evaluation, student performance tracking with AI-suggested feedback, and a reference library with resource comparison.
+Covers: AI-curated resource discovery, assignment/question-paper generation, lesson plan generation, free-form teaching material generation, handwritten submission uploads, AI evaluation, student performance tracking with AI-suggested feedback, and a reference library with resource comparison.
 
 ## Running it
 
