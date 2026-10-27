@@ -5,7 +5,7 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const { recognizeImages, terminateWorker } = require('./lib/ocr');
 const { gradeWithHeuristics } = require('./lib/grading');
-const { isClaudeConfigured, evaluateWithClaude, generateWithClaude, analyzeMistakesWithClaude } = require('./lib/claude');
+const { isClaudeConfigured, evaluateWithClaude, generateWithClaude, generateLessonPlanWithClaude, analyzeMistakesWithClaude } = require('./lib/claude');
 
 const app = express();
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
@@ -88,6 +88,27 @@ app.post('/generate-assignment', aiLimiter, async (req, res) => {
   }
   try {
     const result = await generateWithClaude(req.body || {});
+    return res.json(result);
+  } catch (err) {
+    console.error(err);
+    return res.status(502).send('Generation failed: ' + (err && err.message ? err.message : 'unknown error'));
+  }
+});
+
+// Matches the contract in ../LESSON_PLAN_BACKEND.md. There is no local
+// fallback, for the same reason as /generate-assignment: generating a lesson
+// plan requires real reasoning grounded in the lecture content, not a
+// deterministic transform, so without a configured model this reports
+// NOT_CONFIGURED honestly instead of fabricating a plan.
+app.post('/generate-lesson-plan', aiLimiter, async (req, res) => {
+  if (!isClaudeConfigured()) {
+    return res.status(501).json({
+      errorCode: 'NOT_CONFIGURED',
+      message: 'No ANTHROPIC_API_KEY is set on this server, so real lesson plan generation is unavailable. The frontend will fall back to its built-in demo generator.',
+    });
+  }
+  try {
+    const result = await generateLessonPlanWithClaude(req.body || {});
     return res.json(result);
   } catch (err) {
     console.error(err);

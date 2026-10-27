@@ -530,6 +530,8 @@ const SK = {
   doubtBackendUrl:'edupilot_doubtBackendUrl',
   assignGenBackendUrl:'edupilot_assignGenBackendUrl',
   analysisBackendUrl:'edupilot_analysisBackendUrl',
+  generatedLessonPlans:'edupilot_generatedLessonPlans',
+  lessonPlanBackendUrl:'edupilot_lessonPlanBackendUrl',
 };
 function load(key, fallback){
   try{
@@ -795,6 +797,7 @@ const ROUTES = [
   {key:'lectures', label:'Lectures', icon:'lectures'},
   {key:'assignments', label:'Assignments', icon:'assignments'},
   {key:'generator', label:'Assignment Generator', icon:'generator'},
+  {key:'lessonplans', label:'Lesson Plans', icon:'generator'},
   {key:'submissions', label:'Student Submissions', icon:'submissions'},
   {key:'performance', label:'Performance & Feedback', icon:'performance'},
   {key:'library', label:'Reference Library', icon:'library'},
@@ -2029,6 +2032,13 @@ function renderGenConfigCard(lecture, sufficient){
     <div class="card" style="margin-bottom:20px;">
       <div class="card-head"><h3>Step 2 — Configure Questions</h3></div>
       <p class="hint" style="margin-bottom:12px;">Adapted for ${escapeHtml(band.label)}: ${escapeHtml(band.style)}. Expected answer length: ${escapeHtml(band.answerLength)}.</p>
+      <div class="field" style="margin-bottom:12px;">
+        <label>Output Type</label>
+        <select id="gen-output-kind">
+          <option value="questionPaper">Question Paper (formal, publishable to Assignments)</option>
+          <option value="worksheet">Worksheet (supplementary practice — not published/due)</option>
+        </select>
+      </div>
       <div class="field-row">
         <div class="field"><label>Multiple-choice questions</label><input type="number" id="gen-mcq-count" min="0" max="10" value="3"></div>
         <div class="field"><label>Short-answer questions</label><input type="number" id="gen-short-count" min="0" max="10" value="2"></div>
@@ -2077,6 +2087,7 @@ async function handleGenerateAssignment(lecture, band, allowLong, isMath){
     },
   };
   if(config.mcqCount+config.shortCount+config.longCount+config.sumCount<=0){ toast('Choose at least one question to generate.','error'); return; }
+  const outputKind = $('#gen-output-kind')?.value==='worksheet' ? 'worksheet' : 'questionPaper';
 
   const usingRealBackend = AIAssignmentGenService.isConfigured();
   btn.disabled = true; btn.textContent = usingRealBackend ? 'Generating questions...' : 'Generating demo questions...';
@@ -2087,9 +2098,9 @@ async function handleGenerateAssignment(lecture, band, allowLong, isMath){
   result.questions.forEach(q=>{ q.marks = config.marksOverride[q.type] ?? q.marks; });
 
   const record = {
-    id:uid('genasg'), lectureId:lecture.id, title:lecture.title+' — Assignment',
+    id:uid('genasg'), lectureId:lecture.id, title:lecture.title+(outputKind==='worksheet'?' — Worksheet':' — Assignment'),
     board:lecture.board, class:lecture.class, subject:lecture.subject, chapter:lecture.chapter, topic:lecture.topic, year:lecture.year||DEFAULT_ACADEMIC_YEAR,
-    config, questions:result.questions, contentSources:result.contentSources,
+    config, questions:result.questions, contentSources:result.contentSources, outputKind,
     status:'Draft', linkedAssignmentId:null, dueDate:daysFromNow(7), generatedBy:result.generatedBy||'demo-mock-ai',
     createdAt:new Date().toISOString(), updatedAt:new Date().toISOString(),
   };
@@ -2220,9 +2231,35 @@ function buildAnswerKeyHtml(a){
   </div>`;
 }
 
+const WORKSHEET_GENERAL_INSTRUCTIONS = [
+  'Attempt all questions for practice.',
+  'This is supplementary practice material, not a graded assignment.',
+  'Check your answers using the answer key after completing the worksheet.',
+];
+function buildWorksheetHtml(a){
+  const sections = cbseSections(a.questions);
+  return `<div class="print-paper">
+    <h1>${escapeHtml(a.title.replace(/ — Worksheet$/,''))} — Practice Worksheet</h1>
+    <div class="print-meta">${boardLabel(a.board)} &middot; Class ${a.class} &middot; ${escapeHtml(a.subject)} &middot; ${escapeHtml(a.chapter)}</div>
+    <div class="print-meta">Student Name: ______________________________</div>
+    <hr>
+    <div class="print-instructions"><b>Instructions:</b><ol>${WORKSHEET_GENERAL_INSTRUCTIONS.map(i=>`<li>${escapeHtml(i)}</li>`).join('')}</ol></div>
+    ${sections.map(sec=>`
+      <div class="print-section-title">${escapeHtml(sec.label)}</div>
+      <ol class="print-questions" start="${sec.startNum}">
+        ${sec.questions.map(q=>`<li>
+          <div class="print-q-text">${escapeHtml(q.text)}</div>
+          ${q.type==='mcq'
+            ? `<ol class="print-options">${q.options.map(opt=>`<li>${escapeHtml(opt)}</li>`).join('')}</ol>`
+            : `<div class="print-answer-space">${printLines(q.type==='long'?6:3)}</div>`}
+        </li>`).join('')}
+      </ol>`).join('')}
+  </div>`;
+}
+
 function printAssignmentPaper(record, withAnswers){
   if(!record.questions.length){ toast('This assignment has no questions to print.','error'); return; }
-  $('#print-area').innerHTML = withAnswers ? buildAnswerKeyHtml(record) : buildQuestionPaperHtml(record);
+  $('#print-area').innerHTML = withAnswers ? buildAnswerKeyHtml(record) : (record.outputKind==='worksheet' ? buildWorksheetHtml(record) : buildQuestionPaperHtml(record));
   window.print();
 }
 
@@ -2234,34 +2271,35 @@ function renderGenDraftCard(){
   const a = all.find(x=>x.id===id);
   if(!a){ box.innerHTML=''; GeneratorState.openAssignmentId=null; return; }
   const totalMarks = a.questions.reduce((s,q)=>s+(Number(q.marks)||0),0);
+  const isWorksheet = a.outputKind==='worksheet';
   const statusPill = a.status==='Published'?'pill-evaluated':a.status==='Approved'?'pill-open':'pill-pending';
   box.innerHTML = `
     <div class="card" style="margin-bottom:20px;">
       <div class="card-head">
         <div>
-          <h3>Draft Assignment <span class="pill ${statusPill}">${a.status}</span></h3>
+          <h3>${isWorksheet?'Draft Worksheet':'Draft Assignment'} ${isWorksheet?'<span class="meta-chip">Worksheet</span>':`<span class="pill ${statusPill}">${a.status}</span>`}</h3>
           <div class="hint">${boardLabel(a.board)} · Class ${a.class} · ${escapeHtml(a.subject)} · ${escapeHtml(a.chapter)} · ${escapeHtml(a.topic)}</div>
         </div>
         <div class="hint">${a.questions.length} question${a.questions.length===1?'':'s'} · ${totalMarks} marks</div>
       </div>
-      <div class="info-banner">${ico('doubt')}<div>These questions were generated by a <b>demo mock AI</b> from this lecture's own content — not real AI output. Review and edit before approving or publishing.</div></div>
-      <div class="field"><label>Assignment Title</label><input type="text" id="gen-draft-title" value="${escapeHtml(a.title)}"></div>
+      <div class="info-banner">${ico('doubt')}<div>These questions were generated by a <b>demo mock AI</b> from this lecture's own content — not real AI output. Review and edit before ${isWorksheet?'printing':'approving or publishing'}.</div></div>
+      <div class="field"><label>${isWorksheet?'Worksheet':'Assignment'} Title</label><input type="text" id="gen-draft-title" value="${escapeHtml(a.title)}"></div>
 
       <div id="gen-questions-list" style="display:flex;flex-direction:column;gap:14px;margin:14px 0;">
         ${a.questions.length ? a.questions.map((q,idx)=>renderGenQuestionCard(q, idx)).join('') : '<p class="hint">No questions left in this draft. Regenerate or delete it.</p>'}
       </div>
 
-      <div class="field"><label>Due Date (used when publishing)</label><input type="date" id="gen-draft-duedate" value="${(a.dueDate||daysFromNow(7)).slice(0,10)}"></div>
+      ${isWorksheet?'':`<div class="field"><label>Due Date (used when publishing)</label><input type="date" id="gen-draft-duedate" value="${(a.dueDate||daysFromNow(7)).slice(0,10)}"></div>`}
 
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button type="button" class="btn btn-primary" id="gen-save-changes">Save Changes</button>
         <button type="button" class="btn" id="gen-regenerate">Regenerate</button>
-        ${a.status==='Draft'?`<button type="button" class="btn" id="gen-approve">Approve</button>`:''}
-        ${a.status==='Approved'?`<button type="button" class="btn btn-primary" id="gen-publish">Publish to Assignments</button>`:''}
+        ${!isWorksheet && a.status==='Draft'?`<button type="button" class="btn" id="gen-approve">Approve</button>`:''}
+        ${!isWorksheet && a.status==='Approved'?`<button type="button" class="btn btn-primary" id="gen-publish">Publish to Assignments</button>`:''}
         <button type="button" class="btn btn-danger" id="gen-discard">Delete Draft</button>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
-        <button type="button" class="btn" id="gen-print-paper">${ico('link')} Print Question Paper (PDF)</button>
+        <button type="button" class="btn" id="gen-print-paper">${ico('link')} Print ${isWorksheet?'Worksheet':'Question Paper'} (PDF)</button>
         <button type="button" class="btn" id="gen-print-key">${ico('link')} Print Answer Key (PDF)</button>
       </div>
       <p class="hint" style="margin-top:6px;">Opens your browser's print dialog — choose "Save as PDF" as the destination, or print directly for handing out on paper.</p>
@@ -2283,7 +2321,7 @@ function wireGenDraftCard(assignmentId){
     const all = load(SK.generatedAssignments, []);
     const rec = all.find(x=>x.id===assignmentId); if(!rec) return;
     rec.title = $('#gen-draft-title').value.trim() || rec.title;
-    const dueVal = $('#gen-draft-duedate').value;
+    const dueVal = $('#gen-draft-duedate')?.value;
     if(dueVal) rec.dueDate = new Date(dueVal).toISOString();
     rec.questions.forEach(q=>{
       const textEl = document.querySelector(`.gen-q-text[data-id="${q.id}"]`); if(textEl) q.text = textEl.value;
@@ -2375,14 +2413,15 @@ function renderGenList(){
   const wrap = $('#gen-list-wrap'); if(!wrap) return;
   const all = load(SK.generatedAssignments, []).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
   if(!all.length){ wrap.innerHTML = emptyState('generator','No generated assignments yet.'); return; }
-  wrap.innerHTML = `<table><thead><tr><th>Title</th><th>Board/Class</th><th>Subject</th><th>Questions</th><th>Marks</th><th>Status</th><th></th></tr></thead><tbody>
+  wrap.innerHTML = `<table><thead><tr><th>Title</th><th>Type</th><th>Board/Class</th><th>Subject</th><th>Questions</th><th>Marks</th><th>Status</th><th></th></tr></thead><tbody>
     ${all.map(a=>{
       const marks = a.questions.reduce((s,q)=>s+(Number(q.marks)||0),0);
+      const isWorksheet = a.outputKind==='worksheet';
       const statusPill = a.status==='Published'?'pill-evaluated':a.status==='Approved'?'pill-open':'pill-pending';
       return `<tr>
-        <td>${escapeHtml(a.title)}</td><td>${boardLabel(a.board)} · Class ${a.class}</td><td>${escapeHtml(a.subject)}</td>
+        <td>${escapeHtml(a.title)}</td><td><span class="meta-chip">${isWorksheet?'Worksheet':'Question Paper'}</span></td><td>${boardLabel(a.board)} · Class ${a.class}</td><td>${escapeHtml(a.subject)}</td>
         <td>${a.questions.length}</td><td>${marks}</td>
-        <td><span class="pill ${statusPill}">${a.status}</span></td>
+        <td>${isWorksheet?'—':`<span class="pill ${statusPill}">${a.status}</span>`}</td>
         <td class="row-actions">
           <button class="btn btn-sm" data-action="gen-open" data-id="${a.id}">Open</button>
           <button class="btn btn-sm" data-action="gen-print" data-id="${a.id}">Print</button>
@@ -2434,6 +2473,371 @@ PAGE_INIT.generator = function(){
   });
 
   renderGenList();
+};
+
+/* ========================================================================
+   LESSON PLAN GENERATOR (Phase 14)
+   Mirrors the Assignment Generator's real-backend/demo-fallback pattern
+   (see LESSON_PLAN_BACKEND.md): if a Lesson Plan Backend URL is configured
+   on Settings, this makes a real fetch() there first, grounded only in the
+   lecture's own objectives/notes/description/transcript — never the
+   YouTube link itself. If no backend is configured, or the call fails,
+   this falls back to a deterministic template — never a fabricated "real
+   AI" result — and always labels which path produced a given plan
+   (`generatedBy`). The reference backend for this already exists in
+   server/index.js (`POST /generate-lesson-plan`).
+======================================================================== */
+const LessonPlanState = { openPlanId:null };
+
+const AILessonPlanService = {
+  isConfigured(){ return !!(load(SK.lessonPlanBackendUrl,'')||'').trim(); },
+  async generate(lecture, sources, band){
+    const endpoint = (load(SK.lessonPlanBackendUrl,'')||'').trim();
+    if(endpoint){
+      try{
+        const res = await fetch(endpoint, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            topic:lecture.topic, chapter:lecture.chapter, board:lecture.board, class:lecture.class, subject:lecture.subject,
+            expectedLevel:{label:band.label, style:band.style, answerLength:band.answerLength},
+            groundingSources:{objectives:sources.objectives.join('\n'), referenceNotes:sources.notes, description:sources.description, transcript:sources.transcript},
+          }),
+        });
+        if(res.ok){
+          const data = await res.json();
+          if(data && Array.isArray(data.steps)) return {...data, generatedBy:'real-backend'};
+          toast('Lesson plan backend response was missing a steps array — used the built-in demo template instead.','error');
+        } else {
+          const text = await res.text().catch(()=>'');
+          toast(`Lesson plan backend returned HTTP ${res.status}${text?': '+text:''} — used the built-in demo template instead.`,'error');
+        }
+      } catch(err){
+        toast('Could not reach the lesson plan backend — used the built-in demo template instead.','error');
+      }
+    }
+    return {...mockGenerateLessonPlan(lecture, sources, band), generatedBy:'demo-mock-ai'};
+  },
+};
+
+function mockGenerateLessonPlan(lecture, sources, band){
+  const objectives = sources.objectives.length ? sources.objectives : [`Understand ${lecture.topic}`];
+  return {
+    objectives,
+    materials: ['Whiteboard and markers', 'Textbook / reference notes', 'Printed worksheet (optional)'],
+    warmUp: `Ask students to recall what they already know about ${lecture.topic}, linking back to ${lecture.chapter}.`,
+    steps: [
+      {activity:'Introduce the concept', duration:'10 min', description:`Explain ${lecture.topic} in ${band.style}, using at least one everyday example.`},
+      {activity:'Guided practice', duration:'15 min', description:`Work through 2-3 examples from ${lecture.chapter} together on the board.`},
+      {activity:'Independent practice', duration:'10 min', description:'Students attempt similar problems on their own; circulate to check understanding.'},
+      {activity:'Wrap-up', duration:'5 min', description:`Recap the key points of ${lecture.topic} and address any remaining questions.`},
+    ],
+    assessmentChecks: objectives.map(o=>`Can the student demonstrate: ${o}?`),
+    homework: `Complete practice questions on ${lecture.topic} from ${lecture.chapter}.`,
+    durationMinutes: 40,
+  };
+}
+
+VIEWS.lessonplans = function(){
+  if(!isTeacherOrAdmin()){
+    return `
+      <div class="section-title">Lesson Plans</div>
+      <div class="section-sub">Generate a structured lesson plan from a lecture's existing content.</div>
+      <div class="info-banner">${ico('shield')}<div>This tool is available to teachers.</div></div>`;
+  }
+  const lectures = load(SK.lectures, []);
+  const lpConfigured = AILessonPlanService.isConfigured();
+  return `
+    <div class="section-title">Lesson Plans <span class="demo-label">${lpConfigured?'Real AI backend configured':'Demo mock AI'}</span></div>
+    <div class="section-sub">Generate a draft lesson plan from a lecture's own content — objectives, reference notes, description or transcript. The YouTube link itself is never used as content.</div>
+    ${lpConfigured?'':`<div class="info-banner">${ico('shield')}<div>No Lesson Plan Backend is configured (Settings) — the plan below is produced by a deterministic, template-based demo generator, not a live AI model. See <code>LESSON_PLAN_BACKEND.md</code>.</div></div>`}
+
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head"><h3>Step 1 — Select a Lecture</h3></div>
+      ${!lectures.length ? emptyState('generator','No lectures yet. Add one on the Lectures page first.') : `
+      <div class="field">
+        <label>Lecture</label>
+        <select id="lp-lecture-select">
+          <option value="">Select a lecture...</option>
+          ${lectures.map(l=>`<option value="${l.id}">${escapeHtml(l.title)} — ${boardLabel(l.board)} · Class ${l.class} · ${escapeHtml(l.subject)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="lp-content-check"></div>`}
+    </div>
+
+    <div id="lp-draft-card"></div>
+
+    <div class="card">
+      <div class="card-head"><h3>Generated Lesson Plans</h3></div>
+      <div id="lp-list-wrap"></div>
+    </div>`;
+};
+
+function renderLpContentCheck(lecture){
+  const box = $('#lp-content-check'); if(!box) return;
+  if(!lecture){ box.innerHTML=''; return; }
+  const s = getLectureContentSources(lecture);
+  const row = (label, ok, extra)=>`<div style="display:flex;align-items:center;gap:8px;">
+    <span class="pill ${ok?'pill-evaluated':'pill-neutral'}">${ok?'Available':'Not provided'}</span>
+    <span style="font-size:12.5px;color:var(--text-600);">${label}${extra?' ('+extra+')':''}</span>
+  </div>`;
+  box.innerHTML = `
+    <div class="card" style="background:var(--bg);margin-top:4px;">
+      <div style="font-weight:650;font-size:13px;margin-bottom:8px;">Content available for generation</div>
+      <div style="display:grid;gap:6px;">
+        ${row('Learning objectives', s.hasObjectives, s.objectives.length+' entries')}
+        ${row('Reference notes', s.hasNotes)}
+        ${row('Description', s.hasDescription)}
+        ${row('Transcript', s.hasTranscript)}
+      </div>
+      <p class="hint" style="margin-top:8px;">The YouTube link itself is never treated as content — only the fields above are used.</p>
+      ${!s.sufficient
+        ? `<div class="info-banner" style="margin-top:10px;margin-bottom:0;">${ico('shield')}<div><b>Not enough content yet.</b> Add learning objectives, reference notes or a description to this lecture on the Lectures page before generating a lesson plan.</div></div>`
+        : `<div style="margin-top:10px;"><button type="button" class="btn btn-primary" id="lp-generate-btn">${ico('plus')} Generate Lesson Plan${AILessonPlanService.isConfigured()?'':' (Demo)'}</button></div>`}
+    </div>`;
+  if(s.sufficient) $('#lp-generate-btn').addEventListener('click', ()=>handleGenerateLessonPlan(lecture));
+}
+
+async function handleGenerateLessonPlan(lecture){
+  const btn = $('#lp-generate-btn');
+  const usingRealBackend = AILessonPlanService.isConfigured();
+  btn.disabled = true; btn.textContent = usingRealBackend ? 'Generating lesson plan...' : 'Generating demo lesson plan...';
+  const band = getClassBand(lecture.class);
+  const sources = getLectureContentSources(lecture);
+  const result = await AILessonPlanService.generate(lecture, sources, band);
+  btn.disabled = false; btn.innerHTML = `${ico('plus')} Generate Lesson Plan${usingRealBackend?'':' (Demo)'}`;
+
+  const record = {
+    id:uid('lessplan'), lectureId:lecture.id, title:lecture.title+' — Lesson Plan',
+    board:lecture.board, class:lecture.class, subject:lecture.subject, chapter:lecture.chapter, topic:lecture.topic, year:lecture.year||DEFAULT_ACADEMIC_YEAR,
+    objectives:result.objectives||[], materials:result.materials||[], warmUp:result.warmUp||'', steps:result.steps||[],
+    assessmentChecks:result.assessmentChecks||[], homework:result.homework||'', durationMinutes:result.durationMinutes||40,
+    generatedBy:result.generatedBy||'demo-mock-ai',
+    createdAt:new Date().toISOString(), updatedAt:new Date().toISOString(),
+  };
+  const all = load(SK.generatedLessonPlans, []);
+  all.push(record);
+  save(SK.generatedLessonPlans, all);
+  LessonPlanState.openPlanId = record.id;
+  toast(record.generatedBy==='real-backend' ? 'Lesson plan generated.' : 'Demo lesson plan generated — review before using.','success');
+  renderLpDraftCard();
+  renderLpList();
+  $('#lp-draft-card').scrollIntoView({behavior:'smooth'});
+}
+
+function renderLpDraftCard(){
+  const box = $('#lp-draft-card'); if(!box) return;
+  const id = LessonPlanState.openPlanId;
+  if(!id){ box.innerHTML=''; return; }
+  const all = load(SK.generatedLessonPlans, []);
+  const p = all.find(x=>x.id===id);
+  if(!p){ box.innerHTML=''; LessonPlanState.openPlanId=null; return; }
+  box.innerHTML = `
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-head">
+        <div>
+          <h3>Draft Lesson Plan</h3>
+          <div class="hint">${boardLabel(p.board)} · Class ${p.class} · ${escapeHtml(p.subject)} · ${escapeHtml(p.chapter)} · ${escapeHtml(p.topic)}</div>
+        </div>
+        <div class="hint">${p.durationMinutes} min</div>
+      </div>
+      <div class="info-banner">${ico('doubt')}<div>This plan was generated by a <b>${p.generatedBy==='real-backend'?'real AI backend':'demo mock AI'}</b> from this lecture's own content — review and edit before use in class.</div></div>
+      <div class="field"><label>Title</label><input type="text" id="lp-draft-title" value="${escapeHtml(p.title)}"></div>
+      <div class="field"><label>Duration (minutes)</label><input type="number" id="lp-draft-duration" min="10" max="120" value="${p.durationMinutes}"></div>
+      <div class="field"><label>Learning Objectives (one per line)</label><textarea id="lp-draft-objectives" rows="3">${escapeHtml((p.objectives||[]).join('\n'))}</textarea></div>
+      <div class="field"><label>Materials (one per line)</label><textarea id="lp-draft-materials" rows="2">${escapeHtml((p.materials||[]).join('\n'))}</textarea></div>
+      <div class="field"><label>Warm-up</label><textarea id="lp-draft-warmup" rows="2">${escapeHtml(p.warmUp||'')}</textarea></div>
+
+      <div style="font-weight:650;font-size:13px;margin:14px 0 8px;">Lesson Steps</div>
+      <div id="lp-steps-list" style="display:flex;flex-direction:column;gap:10px;">
+        ${(p.steps||[]).length ? p.steps.map((st,idx)=>`<div class="card" data-step-idx="${idx}" style="background:var(--bg);">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;">
+            <span class="meta-chip">Step ${idx+1}</span>
+            <button type="button" class="btn btn-icon btn-ghost lp-step-delete" data-idx="${idx}" title="Remove step" aria-label="Remove step">${ico('trash')}</button>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Activity</label><input type="text" class="lp-step-activity" data-idx="${idx}" value="${escapeHtml(st.activity||'')}"></div>
+            <div class="field" style="max-width:120px;"><label>Duration</label><input type="text" class="lp-step-duration" data-idx="${idx}" value="${escapeHtml(st.duration||'')}"></div>
+          </div>
+          <div class="field"><label>Description</label><textarea class="lp-step-description" data-idx="${idx}">${escapeHtml(st.description||'')}</textarea></div>
+        </div>`).join('') : '<p class="hint">No steps left in this plan. Regenerate or add one manually.</p>'}
+      </div>
+      <button type="button" class="btn" id="lp-step-add" style="margin-top:10px;">${ico('plus')} Add Step</button>
+
+      <div class="field" style="margin-top:14px;"><label>Assessment Checks (one per line)</label><textarea id="lp-draft-checks" rows="2">${escapeHtml((p.assessmentChecks||[]).join('\n'))}</textarea></div>
+      <div class="field"><label>Homework</label><textarea id="lp-draft-homework" rows="2">${escapeHtml(p.homework||'')}</textarea></div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button type="button" class="btn btn-primary" id="lp-save-changes">Save Changes</button>
+        <button type="button" class="btn" id="lp-regenerate">Regenerate</button>
+        <button type="button" class="btn btn-danger" id="lp-discard">Delete Draft</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+        <button type="button" class="btn" id="lp-print">${ico('link')} Print Lesson Plan (PDF)</button>
+      </div>
+      <p class="hint" style="margin-top:6px;">Opens your browser's print dialog — choose "Save as PDF" as the destination.</p>
+    </div>`;
+  wireLpDraftCard(p.id);
+}
+
+function wireLpDraftCard(planId){
+  $('#lp-steps-list').addEventListener('click', function(e){
+    const btn = e.target.closest('.lp-step-delete'); if(!btn) return;
+    const all = load(SK.generatedLessonPlans, []);
+    const rec = all.find(x=>x.id===planId); if(!rec) return;
+    rec.steps.splice(Number(btn.dataset.idx),1);
+    save(SK.generatedLessonPlans, all);
+    renderLpDraftCard(); renderLpList();
+  });
+
+  $('#lp-step-add').addEventListener('click', function(){
+    const all = load(SK.generatedLessonPlans, []);
+    const rec = all.find(x=>x.id===planId); if(!rec) return;
+    rec.steps = rec.steps||[];
+    rec.steps.push({activity:'', duration:'', description:''});
+    save(SK.generatedLessonPlans, all);
+    renderLpDraftCard(); renderLpList();
+  });
+
+  $('#lp-save-changes').addEventListener('click', function(){
+    const all = load(SK.generatedLessonPlans, []);
+    const rec = all.find(x=>x.id===planId); if(!rec) return;
+    rec.title = $('#lp-draft-title').value.trim() || rec.title;
+    rec.durationMinutes = Number($('#lp-draft-duration').value)||rec.durationMinutes;
+    rec.objectives = $('#lp-draft-objectives').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    rec.materials = $('#lp-draft-materials').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    rec.warmUp = $('#lp-draft-warmup').value.trim();
+    rec.assessmentChecks = $('#lp-draft-checks').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    rec.homework = $('#lp-draft-homework').value.trim();
+    document.querySelectorAll('#lp-steps-list [data-step-idx]').forEach(stepEl=>{
+      const idx = Number(stepEl.dataset.stepIdx);
+      if(!rec.steps[idx]) return;
+      rec.steps[idx].activity = stepEl.querySelector('.lp-step-activity').value;
+      rec.steps[idx].duration = stepEl.querySelector('.lp-step-duration').value;
+      rec.steps[idx].description = stepEl.querySelector('.lp-step-description').value;
+    });
+    rec.updatedAt = new Date().toISOString();
+    save(SK.generatedLessonPlans, all);
+    toast('Lesson plan changes saved.','success');
+    renderLpDraftCard(); renderLpList();
+  });
+
+  $('#lp-regenerate').addEventListener('click', function(){
+    confirmAction('Regenerate lesson plan?',`This replaces the current plan with a new ${AILessonPlanService.isConfigured()?'AI-generated':'demo-generated'} one from the same lecture content. Manual edits will be lost.`, async ()=>{
+      const all = load(SK.generatedLessonPlans, []);
+      const rec = all.find(x=>x.id===planId); if(!rec) return;
+      const lecture = load(SK.lectures, []).find(l=>l.id===rec.lectureId);
+      if(!lecture){ toast('Source lecture not found.','error'); return; }
+      const band = getClassBand(lecture.class);
+      const sources = getLectureContentSources(lecture);
+      const result = await AILessonPlanService.generate(lecture, sources, band);
+      rec.objectives=result.objectives||[]; rec.materials=result.materials||[]; rec.warmUp=result.warmUp||'';
+      rec.steps=result.steps||[]; rec.assessmentChecks=result.assessmentChecks||[]; rec.homework=result.homework||'';
+      rec.durationMinutes=result.durationMinutes||rec.durationMinutes; rec.generatedBy=result.generatedBy||'demo-mock-ai';
+      rec.updatedAt = new Date().toISOString();
+      save(SK.generatedLessonPlans, all);
+      toast('Lesson plan regenerated.','success');
+      renderLpDraftCard(); renderLpList();
+    });
+  });
+
+  $('#lp-discard').addEventListener('click', function(){
+    confirmAction('Delete this lesson plan?','This removes the generated lesson plan draft.', ()=>{
+      save(SK.generatedLessonPlans, load(SK.generatedLessonPlans, []).filter(x=>x.id!==planId));
+      LessonPlanState.openPlanId = null;
+      toast('Lesson plan deleted.','success');
+      renderLpDraftCard(); renderLpList();
+    }, true);
+  });
+
+  $('#lp-print').addEventListener('click', function(){
+    const rec = load(SK.generatedLessonPlans, []).find(x=>x.id===planId); if(!rec) return;
+    printLessonPlan(rec);
+  });
+}
+
+function buildLessonPlanHtml(p){
+  return `<div class="print-paper">
+    <h1>${escapeHtml(p.title)}</h1>
+    <div class="print-meta">${boardLabel(p.board)} &middot; Class ${p.class} &middot; ${escapeHtml(p.subject)} &middot; ${escapeHtml(p.chapter)}</div>
+    <div class="print-meta">Duration: ${p.durationMinutes} minutes</div>
+    <hr>
+    <div class="print-instructions"><b>Learning Objectives:</b><ol>${(p.objectives||[]).map(o=>`<li>${escapeHtml(o)}</li>`).join('')}</ol></div>
+    <div class="print-instructions"><b>Materials:</b><ol>${(p.materials||[]).map(m=>`<li>${escapeHtml(m)}</li>`).join('')}</ol></div>
+    <div class="print-section-title">Warm-up</div>
+    <p>${escapeHtml(p.warmUp||'')}</p>
+    <div class="print-section-title">Lesson Steps</div>
+    <ol class="print-questions">
+      ${(p.steps||[]).map(st=>`<li><div class="print-q-text"><b>${escapeHtml(st.activity||'')}</b> <span class="print-marks">[${escapeHtml(st.duration||'')}]</span></div><div>${escapeHtml(st.description||'')}</div></li>`).join('')}
+    </ol>
+    <div class="print-section-title">Assessment Checks</div>
+    <ol class="print-questions">${(p.assessmentChecks||[]).map(c=>`<li>${escapeHtml(c)}</li>`).join('')}</ol>
+    <div class="print-section-title">Homework</div>
+    <p>${escapeHtml(p.homework||'')}</p>
+  </div>`;
+}
+function printLessonPlan(record){
+  $('#print-area').innerHTML = buildLessonPlanHtml(record);
+  window.print();
+}
+
+function renderLpList(){
+  const wrap = $('#lp-list-wrap'); if(!wrap) return;
+  const all = load(SK.generatedLessonPlans, []).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  if(!all.length){ wrap.innerHTML = emptyState('generator','No generated lesson plans yet.'); return; }
+  wrap.innerHTML = `<table><thead><tr><th>Title</th><th>Board/Class</th><th>Subject</th><th>Duration</th><th>Steps</th><th></th></tr></thead><tbody>
+    ${all.map(p=>`<tr>
+      <td>${escapeHtml(p.title)}</td><td>${boardLabel(p.board)} · Class ${p.class}</td><td>${escapeHtml(p.subject)}</td>
+      <td>${p.durationMinutes} min</td><td>${(p.steps||[]).length}</td>
+      <td class="row-actions">
+        <button class="btn btn-sm" data-action="lp-open" data-id="${p.id}">Open</button>
+        <button class="btn btn-sm" data-action="lp-print" data-id="${p.id}">Print</button>
+        <button class="btn btn-icon btn-ghost" data-action="lp-delete" data-id="${p.id}" title="Delete" aria-label="Delete">${ico('trash')}</button>
+      </td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+PAGE_INIT.lessonplans = function(){
+  if(!isTeacherOrAdmin()) return;
+  LessonPlanState.openPlanId = null;
+
+  const sel = $('#lp-lecture-select');
+  if(sel){
+    sel.addEventListener('change', function(){
+      LessonPlanState.openPlanId = null;
+      $('#lp-draft-card').innerHTML = '';
+      const lecture = load(SK.lectures, []).find(l=>l.id===this.value);
+      renderLpContentCheck(lecture);
+    });
+  }
+
+  $('#lp-list-wrap')?.addEventListener('click', function(e){
+    const btn = e.target.closest('[data-action]'); if(!btn) return;
+    const id = btn.dataset.id;
+    if(btn.dataset.action==='lp-open'){
+      LessonPlanState.openPlanId = id;
+      const rec = load(SK.generatedLessonPlans, []).find(x=>x.id===id);
+      if(rec && sel){
+        sel.value = rec.lectureId;
+        renderLpContentCheck(load(SK.lectures, []).find(l=>l.id===rec.lectureId));
+      }
+      renderLpDraftCard();
+      $('#lp-draft-card').scrollIntoView({behavior:'smooth'});
+    }
+    if(btn.dataset.action==='lp-print'){
+      const rec = load(SK.generatedLessonPlans, []).find(x=>x.id===id); if(!rec) return;
+      printLessonPlan(rec);
+    }
+    if(btn.dataset.action==='lp-delete'){
+      confirmAction('Delete generated lesson plan?','This removes the lesson plan draft.', ()=>{
+        save(SK.generatedLessonPlans, load(SK.generatedLessonPlans, []).filter(x=>x.id!==id));
+        if(LessonPlanState.openPlanId===id){ LessonPlanState.openPlanId=null; $('#lp-draft-card').innerHTML=''; }
+        toast('Generated lesson plan deleted.','success');
+        renderLpList();
+      }, true);
+    }
+  });
+
+  renderLpList();
 };
 
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg','image/png','image/webp'];
@@ -2619,6 +3023,23 @@ function analysisFromEvaluation(s){
 const MISTAKE_ASSESSMENT_LABEL = {correct:'Correct', partially_correct:'Partially Correct', incorrect:'Incorrect', uncertain:'Needs a closer look'};
 function mistakePillClass(assessment){
   return assessment==='correct' ? 'pill-evaluated' : assessment==='uncertain' ? 'pill-pending' : 'pill-overdue';
+}
+/* Deterministic match only — never lets the AI name a specific resource.
+   The model (see MISTAKE_ANALYSIS_BACKEND.md) returns short topic keywords
+   only; this looks those keywords up against the school's own, already-
+   vetted Reference Library, so a suggestion can never point to something
+   that doesn't actually exist in the library. */
+function matchLibraryResourcesByTopics(topics, s){
+  if(!topics || !topics.length) return [];
+  const keywords = topics.map(t=>String(t).toLowerCase().trim()).filter(Boolean);
+  if(!keywords.length) return [];
+  const items = load(SK.library, []).filter(i=>{
+    if(s.class && String(i.class)!==String(s.class)) return false;
+    if(s.subject && i.subject!==s.subject) return false;
+    const haystack = (i.title+' '+(i.chapter||'')+' '+(i.topic||'')+' '+(i.teacherNotes||'')).toLowerCase();
+    return keywords.some(k=>haystack.includes(k));
+  });
+  return items.slice(0,5);
 }
 function renderMistakeAnalysisBlock(s, canEvaluate){
   const kind = s.kind || 'image';
@@ -4243,7 +4664,7 @@ VIEWS.library = function(){
 
     <div class="card" style="margin-bottom:20px;">
       <div class="toolbar">
-        <div class="search-box">${ico('search')}<input type="text" id="lib-search" placeholder="Search title, author, publisher or ISBN..."></div>
+        <div class="search-box">${ico('search')}<input type="text" id="lib-search" placeholder="Search title, author, chapter, topic, notes..."></div>
         <select id="lib-filter-class"><option value="">All classes</option>${classOptions('')}</select>
         <select id="lib-filter-subject"><option value="">All subjects</option></select>
         <select id="lib-filter-chapter"><option value="">All chapters</option></select>
@@ -4480,7 +4901,7 @@ function renderLibraryTable(){
     if(frole==='none' && i.referenceRole){ return false; }
     else if(frole && frole!=='none' && i.referenceRole!==frole) return false;
     if(savedOnly && !i.saved) return false;
-    if(q && !(i.title+' '+(i.author||'')+' '+(i.publisher||'')+' '+(i.isbn||'')).toLowerCase().includes(q)) return false;
+    if(q && !(i.title+' '+(i.author||'')+' '+(i.publisher||'')+' '+(i.isbn||'')+' '+(i.chapter||'')+' '+(i.topic||'')+' '+(i.teacherNotes||'')).toLowerCase().includes(q)) return false;
     return true;
   }).sort((a,b)=>new Date(b.updatedAt||0)-new Date(a.updatedAt||0));
 
@@ -4697,6 +5118,17 @@ VIEWS.settings = function(){
     </div>
 
     <div class="card" style="margin-top:20px;">
+      <div class="card-head"><h3>Lesson Plan Backend <span class="demo-label">Phase 14</span></h3></div>
+      <p class="hint" style="margin-bottom:12px;">Real AI-generated lesson plans, grounded only in a lecture's own objectives/notes/description/transcript, require a backend server you control, holding your own language-model provider credentials — this demo never stores or sends any API key from the browser. Point this at your backend's endpoint once you have one running; see <code>LESSON_PLAN_BACKEND.md</code> in the project for the exact request/response contract and security requirements. Leaving this blank keeps the built-in demo template as the only mode.</p>
+      <div class="field">
+        <label>Lesson Plan Backend URL</label>
+        <input type="url" id="settings-lessonplan-endpoint" placeholder="https://your-backend.example.com/api/ai/generate-lesson-plan" value="${escapeHtml(load(SK.lessonPlanBackendUrl,''))}">
+      </div>
+      <p class="hint" id="settings-lessonplan-status" style="margin-bottom:12px;"></p>
+      <button class="btn btn-primary" id="settings-lessonplan-save">Save Backend URL</button>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
       <div class="card-head"><h3>AI Mistake Analysis Backend <span class="demo-label">Phase 13</span></h3></div>
       <p class="hint" style="margin-bottom:12px;">Open-ended AI explanations of mistakes in a student's own submitted work (written answers, photos, or PDFs) require a backend server you control, holding your own AI provider credentials — this demo never stores or sends any API key from the browser. Point this at your backend's endpoint once you have one running; see <code>MISTAKE_ANALYSIS_BACKEND.md</code> in the project for the exact request/response contract. This is separate from the Evaluation Backend above — it works even for submissions with no linked assignment or question set.</p>
       <div class="field">
@@ -4716,6 +5148,7 @@ VIEWS.settings = function(){
         <li>Image uploads are previewed locally in the browser only and are never stored or transmitted, unless you configure a real evaluation backend above.</li>
         <li>AI evaluation of handwritten submissions (Phase 5) only runs against a backend you configure and deploy yourself; without one, evaluation attempts fail honestly rather than producing fabricated results.</li>
         <li>Real AI question generation (Phase 9) likewise only runs against a backend you configure and deploy yourself; without one, or if that backend fails, the Assignment Generator falls back to its original deterministic demo generator and always labels which one actually produced a given draft. A reference backend implementing both this and the evaluation contract is included in <code>server/</code> — see <code>server/README.md</code>.</li>
+        <li>Real AI lesson plan generation (Phase 14) follows the same pattern as the Assignment Generator — without a configured backend, or if it fails, the Lesson Plan generator falls back to a deterministic demo template and always labels which one produced a given plan. The same reference backend in <code>server/</code> implements this contract too.</li>
         <li>AI Mistake Analysis (Phase 13) is a student-triggered, open-ended explanation of a submission's own mistakes — it is informational only, never an official score, and only runs against a backend you configure; without one it reports this honestly instead of fabricating an analysis. Word documents (DOC/DOCX) are not analyzed — only PDFs, photos and typed answers — since reliable text extraction from DOC/DOCX needs a library this project does not bundle.</li>
         <li>Per-student performance evidence and AI-suggested feedback are computed from this demo's own submission records; the demo role switch is not a real access-control boundary — a real backend must authorize which students a given teacher may view, <b>and</b> verify a student's own identity before showing them anything (see EVALUATION_BACKEND.md). The "Who are you?" picker on the student side is a demo stand-in for login, not authentication.</li>
         <li>The Reference Library's resource comparison (Phase 8) is a rule-based heuristic over the metadata and notes a teacher enters — it never reads a book's actual content, and depth/clarity/difficulty assessments shown there are literally the teacher's own notes, not an AI judgment.</li>
@@ -4778,6 +5211,19 @@ PAGE_INIT.settings = function(){
     save(SK.assignGenBackendUrl, val);
     refreshAssignGenStatus();
     toast(val?'Assignment generator backend URL saved.':'Assignment generator backend cleared.','success');
+  });
+
+  const lessonPlanStatusEl = $('#settings-lessonplan-status');
+  const refreshLessonPlanStatus = ()=>{
+    const url = load(SK.lessonPlanBackendUrl,'');
+    lessonPlanStatusEl.textContent = url ? `Configured: ${url}` : 'Not configured — the Lesson Plan generator will use its built-in demo template instead.';
+  };
+  refreshLessonPlanStatus();
+  $('#settings-lessonplan-save').addEventListener('click', function(){
+    const val = $('#settings-lessonplan-endpoint').value.trim();
+    save(SK.lessonPlanBackendUrl, val);
+    refreshLessonPlanStatus();
+    toast(val?'Lesson plan backend URL saved.':'Lesson plan backend cleared.','success');
   });
 
   const analysisStatusEl = $('#settings-analysis-status');

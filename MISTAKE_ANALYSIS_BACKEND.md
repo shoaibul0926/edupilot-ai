@@ -59,13 +59,21 @@ Content-Type: `multipart/form-data`:
       "tip": "Remember the four stages in order: evaporation, condensation, precipitation, collection."
     }
   ],
-  "flags": []                      // e.g. "illegible_handwriting", "low_confidence", "needs_teacher_review"
+  "flags": [],                     // e.g. "illegible_handwriting", "low_confidence", "needs_teacher_review"
+  "suggestedTopics": ["evaporation", "water cycle stages"]  // optional, 3-5 short keywords, omit or [] if fully correct
 }
 ```
 
 Never invent an answer the model cannot actually read — when handwriting or
 a scan is unclear, that item's `assessment` should be `"uncertain"` with an
 explanation of what's unclear, not a guessed result.
+
+`suggestedTopics` must be short topic/keyword strings only — **never** a
+resource title, URL, or description. The frontend matches these keywords
+against its own Reference Library (deterministic substring match, no AI
+involved in that step) to surface real, already-approved resources for
+self-guided review. Do not name or describe a specific resource yourself;
+you have no visibility into what the school's library actually contains.
 
 ## 3. No results without a real model
 
