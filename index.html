@@ -532,6 +532,7 @@ const SK = {
   analysisBackendUrl:'edupilot_analysisBackendUrl',
   generatedLessonPlans:'edupilot_generatedLessonPlans',
   lessonPlanBackendUrl:'edupilot_lessonPlanBackendUrl',
+  resourceDiscoveryBackendUrl:'edupilot_resourceDiscoveryBackendUrl',
 };
 function load(key, fallback){
   try{
@@ -4562,7 +4563,69 @@ PAGE_INIT.doubt = function(){
    Nothing here ever invents a book's bibliographic details, claims to have
    read a book it only has metadata for, or fabricates a link-check result.
 ======================================================================== */
-const LibraryState = { selected:new Set(), discover:{type:'Video Lecture', class:'5', language:'English'} };
+const LibraryState = { selected:new Set(), discover:{type:'Video Lecture', class:'5', language:'English'}, lastDiscovery:null };
+
+/* ========================================================================
+   AI RESOURCE FINDER CURATION (Phase 15)
+   Mirrors the Assignment Generator / Lesson Plan real-backend/demo-fallback
+   pattern (see RESOURCE_DISCOVERY_BACKEND.md): if a Resource Discovery
+   Backend URL is configured on Settings, this makes a real fetch() there
+   first. If no backend is configured, or the call fails, this falls back
+   to a simpler deterministic template.
+   The one rule that holds in BOTH modes: a suggestion only ever names a
+   resourceType, a short "focus" description, a ready-to-use searchQuery
+   and a reason — never a specific real title, author or URL. The frontend
+   only ever opens a live YouTube/Google search built from searchQuery; the
+   teacher still finds, opens and manually confirms the real resource
+   before saving it below (same invariant as buildResourceSearchLink and
+   the mistake-analysis suggestedTopics matching).
+======================================================================== */
+const AIResourceDiscoveryService = {
+  isConfigured(){ return !!(load(SK.resourceDiscoveryBackendUrl,'')||'').trim(); },
+  async discover(prompt, filters){
+    const endpoint = (load(SK.resourceDiscoveryBackendUrl,'')||'').trim();
+    if(endpoint){
+      try{
+        const res = await fetch(endpoint, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ prompt, filters }),
+        });
+        if(res.ok){
+          const data = await res.json();
+          if(data && Array.isArray(data.suggestions)) return {suggestions:data.suggestions, generatedBy:'real-backend'};
+          toast('Resource discovery backend response was missing a suggestions array — used the built-in demo template instead.','error');
+        } else {
+          const text = await res.text().catch(()=>'');
+          toast(`Resource discovery backend returned HTTP ${res.status}${text?': '+text:''} — used the built-in demo template instead.`,'error');
+        }
+      } catch(err){
+        toast('Could not reach the resource discovery backend — used the built-in demo template instead.','error');
+      }
+    }
+    return {...mockDiscoverResources(prompt, filters), generatedBy:'demo-mock-ai'};
+  },
+};
+
+/* Deterministic demo fallback: no real language understanding of the
+   prompt, just folds it straight into the search query — unlike the real
+   backend, it cannot break a prompt into several distinct, reasoned
+   suggestions. Still follows the same never-name-a-real-resource rule. */
+function mockDiscoverResources(prompt, filters){
+  const types = filters.resourceType ? [filters.resourceType] : ['Video Lecture','Worksheet'];
+  const contextParts = [filters.subject, filters.chapter, filters.topic, filters.class?('Class '+filters.class):'', 'CBSE'].filter(Boolean).join(' ');
+  return {
+    suggestions: types.map(t=>({
+      resourceType: t,
+      focus: (prompt||'').trim() || `A ${t.toLowerCase()} covering ${filters.topic||filters.chapter||filters.subject||'this topic'}`,
+      searchQuery: [contextParts, (prompt||'').trim(), t==='Video Lecture'?'lecture':t==='Worksheet'?'worksheet pdf':''].filter(Boolean).join(' '),
+      reason: 'Built directly from the class, subject and filters you selected — the demo template cannot reason about your prompt the way a real AI backend can.',
+    })),
+  };
+}
+function buildSearchLinkFromQuery(resourceType, query){
+  if(resourceType==='Video Lecture') return 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query);
+  return 'https://www.google.com/search?q=' + encodeURIComponent(query);
+}
 
 function resourceTypeOptions(selected){
   return RESOURCE_TYPES.map(t=>`<option value="${t}" ${t===selected?'selected':''}>${t}</option>`).join('');
@@ -4636,7 +4699,11 @@ VIEWS.library = function(){
 
     <div class="card" style="margin-bottom:20px;">
       <div class="card-head"><h3>Discover &amp; Save a Resource <span class="demo-label">AI Resource Finder</span></h3></div>
-      <p class="hint" style="margin-bottom:10px;">Opens a genuine search on YouTube or Google for the class/subject/chapter/topic you choose — exactly like the "Find on YouTube" tool on the Lectures page. This never fabricates a resource; once you find something worth keeping, paste its real title and link below to save it here.</p>
+      <p class="hint" style="margin-bottom:10px;">Opens a genuine search on YouTube or Google for the class/subject/chapter/topic you choose — exactly like the "Find on YouTube" tool on the Lectures page — or describe what you need below and let AI break it into several targeted search suggestions. Either way, this never fabricates a resource; once you find something worth keeping, paste its real title and link below to save it here.</p>
+      <div class="field">
+        <label>Describe what you need <span class="hint" style="font-weight:400;">(optional — powers "Curate with AI" below)</span></label>
+        <textarea id="disc-prompt" rows="2" placeholder="e.g. Need something to help my Class 5 students practice adding fractions with different denominators before Friday's test"></textarea>
+      </div>
       <div class="field-row">
         <div class="field"><label>Resource Type</label><select id="disc-type">${resourceTypeOptions(LibraryState.discover.type)}</select></div>
         <div class="field"><label>Class</label><select id="disc-class">${classOptions(LibraryState.discover.class)}</select></div>
@@ -4647,7 +4714,11 @@ VIEWS.library = function(){
         <div class="field"><label>Chapter <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" id="disc-chapter" list="lib-chapter-suggestions"></div>
         <div class="field"><label>Topic <span class="hint" style="font-weight:400;">(optional)</span></label><input type="text" id="disc-topic" list="lib-topic-suggestions"></div>
       </div>
-      <button type="button" class="btn" id="disc-search-btn">${ico('search')} Search</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn" id="disc-search-btn">${ico('search')} Search</button>
+        <button type="button" class="btn btn-primary" id="disc-ai-btn">${ico('doubt')} Curate with AI${AIResourceDiscoveryService.isConfigured()?'':' (Demo)'}</button>
+      </div>
+      <div id="disc-ai-results"></div>
 
       <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
         <div style="font-weight:650;font-size:13px;margin-bottom:8px;">Found something? Save it here</div>
@@ -4699,6 +4770,33 @@ function refreshLibrarySuggestionLists(cls, subject){
   if(chapterList) chapterList.innerHTML = chapters.map(c=>`<option value="${escapeHtml(c)}">`).join('');
   const topicList = $('#lib-topic-suggestions');
   if(topicList) topicList.innerHTML = topics.map(t=>`<option value="${escapeHtml(t)}">`).join('');
+}
+
+function renderDiscoveryResults(){
+  const box = $('#disc-ai-results'); if(!box) return;
+  const d = LibraryState.lastDiscovery;
+  if(!d){ box.innerHTML=''; return; }
+  if(!d.suggestions.length){ box.innerHTML = `<p class="hint" style="margin-top:12px;">No suggestions came back — try a more specific request.</p>`; return; }
+  box.innerHTML = `
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+      <div class="info-banner">${ico('doubt')}<div>Suggested by a <b>${d.generatedBy==='real-backend'?'real AI backend':'demo mock AI'}</b> — these are ideas for what to search, never a claim that a specific resource exists. Open each search, confirm what you actually find, then save its real title and link above.</div></div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+        ${d.suggestions.map((s,idx)=>`<div class="card" style="background:var(--bg);">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:6px;">
+            <span class="meta-chip">${escapeHtml(s.resourceType||'Other')}</span>
+            <button type="button" class="btn btn-sm" data-action="disc-open" data-idx="${idx}">${ico('link')} Open Search</button>
+          </div>
+          <div style="font-weight:600;font-size:13.5px;margin-bottom:4px;">${escapeHtml(s.focus||'')}</div>
+          <div class="hint">${escapeHtml(s.reason||'')}</div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  box.querySelectorAll('[data-action="disc-open"]').forEach(btn=>{
+    btn.addEventListener('click', function(){
+      const s = LibraryState.lastDiscovery.suggestions[Number(this.dataset.idx)]; if(!s) return;
+      window.open(buildSearchLinkFromQuery(s.resourceType, s.searchQuery||s.focus||''), '_blank', 'noopener');
+    });
+  });
 }
 
 function normalizeResourceUrl(url){
@@ -4935,6 +5033,7 @@ function renderLibraryTable(){
 
 PAGE_INIT.library = function(){
   LibraryState.selected = new Set();
+  LibraryState.lastDiscovery = null;
   renderLibraryFilters();
   renderLibraryTable();
 
@@ -5048,6 +5147,20 @@ PAGE_INIT.library = function(){
     const url = buildResourceSearchLink(discType.value, {class:discClass.value, subject:discSubject.value, chapter:discChapter.value, topic:discTopic.value, language:discLanguage.value});
     window.open(url, '_blank', 'noopener');
   });
+
+  $('#disc-ai-btn')?.addEventListener('click', async function(){
+    const prompt = ($('#disc-prompt')?.value||'').trim();
+    const filters = {resourceType:discType.value, board:'cbse', class:discClass.value, subject:discSubject.value, chapter:discChapter.value, topic:discTopic.value, language:discLanguage.value};
+    if(!prompt && !filters.subject){ toast('Describe what you need, or at least pick a class and subject, before curating.','error'); return; }
+    const btn = this;
+    const usingRealBackend = AIResourceDiscoveryService.isConfigured();
+    btn.disabled = true; btn.textContent = usingRealBackend ? 'Curating...' : 'Curating (demo)...';
+    const result = await AIResourceDiscoveryService.discover(prompt, filters);
+    btn.disabled = false; btn.innerHTML = `${ico('doubt')} Curate with AI${usingRealBackend?'':' (Demo)'}`;
+    LibraryState.lastDiscovery = {...result, filters};
+    renderDiscoveryResults();
+  });
+
   const discoverForm = $('#discover-save-form');
   discoverForm.addEventListener('submit', function(e){
     e.preventDefault();
@@ -5129,6 +5242,17 @@ VIEWS.settings = function(){
     </div>
 
     <div class="card" style="margin-top:20px;">
+      <div class="card-head"><h3>Resource Discovery Backend <span class="demo-label">Phase 15</span></h3></div>
+      <p class="hint" style="margin-bottom:12px;">Real AI curation for the Reference Library's "Curate with AI" tool — turning a teacher's free-text request into several targeted search suggestions — requires a backend server you control, holding your own language-model provider credentials — this demo never stores or sends any API key from the browser. Point this at your backend's endpoint once you have one running; see <code>RESOURCE_DISCOVERY_BACKEND.md</code> in the project for the exact request/response contract and security requirements. Leaving this blank keeps the built-in demo template as the only mode.</p>
+      <div class="field">
+        <label>Resource Discovery Backend URL</label>
+        <input type="url" id="settings-resourcediscovery-endpoint" placeholder="https://your-backend.example.com/api/ai/discover-resources" value="${escapeHtml(load(SK.resourceDiscoveryBackendUrl,''))}">
+      </div>
+      <p class="hint" id="settings-resourcediscovery-status" style="margin-bottom:12px;"></p>
+      <button class="btn btn-primary" id="settings-resourcediscovery-save">Save Backend URL</button>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
       <div class="card-head"><h3>AI Mistake Analysis Backend <span class="demo-label">Phase 13</span></h3></div>
       <p class="hint" style="margin-bottom:12px;">Open-ended AI explanations of mistakes in a student's own submitted work (written answers, photos, or PDFs) require a backend server you control, holding your own AI provider credentials — this demo never stores or sends any API key from the browser. Point this at your backend's endpoint once you have one running; see <code>MISTAKE_ANALYSIS_BACKEND.md</code> in the project for the exact request/response contract. This is separate from the Evaluation Backend above — it works even for submissions with no linked assignment or question set.</p>
       <div class="field">
@@ -5155,6 +5279,7 @@ VIEWS.settings = function(){
         <li>The Reference Library's "Check Link" feature can only report whether a browser request to a URL succeeded or failed — cross-origin restrictions mean it cannot read the page's real HTTP status or confirm the content actually loaded correctly.</li>
         <li>Reference Library resources are scoped to CBSE, the platform's only supported board.</li>
         <li>The AI Resource Finder integration opens genuine YouTube/Google searches built from curriculum fields — it never fabricates a resource; a teacher still has to find, open and confirm the actual resource before saving its real title and link.</li>
+        <li>"Curate with AI" (Phase 15) turns a free-text request into several targeted search suggestions — never a specific resource title, author or URL, since the model has no way to know what actually exists online. Without a configured Resource Discovery Backend, or if it fails, it falls back to a simpler demo template built only from the filters, clearly labeled. Either way, a teacher still has to open each search and confirm the real resource before saving it.</li>
         <li>All data is stored in this browser's localStorage and is not shared between devices or teachers — a real multi-user deployment needs server-side storage with per-teacher accounts and access control, not just a larger browser quota.</li>
       </ul>
     </div>`;
@@ -5224,6 +5349,19 @@ PAGE_INIT.settings = function(){
     save(SK.lessonPlanBackendUrl, val);
     refreshLessonPlanStatus();
     toast(val?'Lesson plan backend URL saved.':'Lesson plan backend cleared.','success');
+  });
+
+  const resourceDiscoveryStatusEl = $('#settings-resourcediscovery-status');
+  const refreshResourceDiscoveryStatus = ()=>{
+    const url = load(SK.resourceDiscoveryBackendUrl,'');
+    resourceDiscoveryStatusEl.textContent = url ? `Configured: ${url}` : 'Not configured — "Curate with AI" will use its built-in demo template instead.';
+  };
+  refreshResourceDiscoveryStatus();
+  $('#settings-resourcediscovery-save').addEventListener('click', function(){
+    const val = $('#settings-resourcediscovery-endpoint').value.trim();
+    save(SK.resourceDiscoveryBackendUrl, val);
+    refreshResourceDiscoveryStatus();
+    toast(val?'Resource discovery backend URL saved.':'Resource discovery backend cleared.','success');
   });
 
   const analysisStatusEl = $('#settings-analysis-status');

@@ -5,7 +5,7 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const { recognizeImages, terminateWorker } = require('./lib/ocr');
 const { gradeWithHeuristics } = require('./lib/grading');
-const { isClaudeConfigured, evaluateWithClaude, generateWithClaude, generateLessonPlanWithClaude, analyzeMistakesWithClaude } = require('./lib/claude');
+const { isClaudeConfigured, evaluateWithClaude, generateWithClaude, generateLessonPlanWithClaude, analyzeMistakesWithClaude, discoverResourcesWithClaude } = require('./lib/claude');
 
 const app = express();
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
@@ -150,6 +150,28 @@ app.post('/analyze-mistakes', aiLimiter, upload.array('files'), async (req, res)
   } catch (err) {
     console.error(err);
     return res.status(502).send('Analysis failed: ' + (err && err.message ? err.message : 'unknown error'));
+  }
+});
+
+// Matches the contract in ../RESOURCE_DISCOVERY_BACKEND.md. There is no
+// local heuristic fallback for this one — turning a free-text prompt into
+// well-targeted search ideas requires real reasoning, not a deterministic
+// transform, so without a configured model this reports NOT_CONFIGURED
+// honestly instead of fabricating generic results. (The frontend still has
+// its own simpler, clearly-labeled demo template so the UI never dead-ends.)
+app.post('/discover-resources', aiLimiter, async (req, res) => {
+  if (!isClaudeConfigured()) {
+    return res.status(501).json({
+      errorCode: 'NOT_CONFIGURED',
+      message: 'No ANTHROPIC_API_KEY is set on this server, so AI resource curation is unavailable. The frontend will fall back to its built-in demo template.',
+    });
+  }
+  try {
+    const result = await discoverResourcesWithClaude(req.body || {});
+    return res.json(result);
+  } catch (err) {
+    console.error(err);
+    return res.status(502).send('Discovery failed: ' + (err && err.message ? err.message : 'unknown error'));
   }
 });
 

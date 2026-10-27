@@ -124,4 +124,30 @@ Board: ${payload.board}. Keep language simple and encouraging, suitable for a Cl
   return extractJson(text);
 }
 
-module.exports = { isClaudeConfigured, evaluateWithClaude, generateWithClaude, generateLessonPlanWithClaude, analyzeMistakesWithClaude };
+/* Phase 15: AI Resource Finder curation. Turns a teacher's free-text prompt
+ * (plus class/subject/chapter/topic/language/type filters) into several
+ * targeted search suggestions. Like suggestedTopics in
+ * analyzeMistakesWithClaude above, this must NEVER name a specific real
+ * resource (title, author, publisher, URL) — the model has no way to know
+ * what actually exists online. It only ever proposes what to look for and a
+ * search query; the frontend opens that as a real YouTube/Google search, and
+ * the teacher still finds, opens and manually confirms whatever they save.
+ */
+async function discoverResourcesWithClaude(body) {
+  const anthropic = client();
+  const prompt = `A CBSE teacher is looking for teaching resources. Suggest 3-6 targeted search ideas — never a specific resource title, author, publisher, or URL, since you cannot know what actually exists online; only describe what to look for and a ready-to-use search query. Respond with ONLY a single JSON object, no other text, no markdown fences:
+{"suggestions":[{"resourceType":"Textbook|Workbook|Video Lecture|Worksheet|Question Bank|Article|Other","focus":"short description of what this resource should cover or show","searchQuery":"a ready-to-use web/video search query, including class/subject/topic context","reason":"one sentence tying this suggestion to the teacher's request"}]}
+
+Teacher's request: "${body.prompt || '(no free-text request — use the filters below only)'}"
+Filters: Board ${body.filters && body.filters.board}, Class ${body.filters && body.filters.class}, Subject ${body.filters && body.filters.subject}, Chapter ${body.filters && body.filters.chapter}, Topic ${body.filters && body.filters.topic}, Preferred resource type ${(body.filters && body.filters.resourceType) || '(any)'}, Language ${body.filters && body.filters.language}.
+If the request and filters are too sparse to responsibly target suggestions, fall back to general suggestions for the given class/subject/topic rather than inventing specifics.`;
+  const msg = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 2048,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const text = msg.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+  return extractJson(text);
+}
+
+module.exports = { isClaudeConfigured, evaluateWithClaude, generateWithClaude, generateLessonPlanWithClaude, analyzeMistakesWithClaude, discoverResourcesWithClaude };
