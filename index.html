@@ -69,7 +69,7 @@ a:hover{text-decoration:underline;}
 }
 .role-card .brand .name{font-size:19px;font-weight:700;}
 .role-card .subtitle{color:var(--text-600);margin-bottom:24px;font-size:13.5px;}
-.role-options{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px;}
+.role-options{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:18px;}
 .role-opt{
   border:1.5px solid var(--border);border-radius:var(--radius);padding:18px 10px;text-align:center;
   cursor:pointer;background:#fff;transition:.15s;
@@ -333,11 +333,6 @@ tr:last-child td{border-bottom:none;}
         <div class="icon" id="ri-student"></div>
         <div class="label">Student</div>
         <div class="desc">Learning, assignments, AI assistant</div>
-      </div>
-      <div class="role-opt" data-role="admin">
-        <div class="icon" id="ri-admin"></div>
-        <div class="label">Administrator</div>
-        <div class="desc">Curriculum &amp; platform stats</div>
       </div>
     </div>
     <div class="role-gate-note">This is a demonstration role switcher, not real authentication. No passwords or accounts are used.</div>
@@ -814,8 +809,7 @@ const STUDENT_ROUTES = [
   {key:'performance', label:'My Progress', icon:'performance'},
 ];
 
-function isTeacherOrAdmin(){ return State.role === 'teacher' || State.role === 'admin'; }
-function isAdmin(){ return State.role === 'admin'; }
+function isTeacherOrAdmin(){ return State.role === 'teacher'; }
 function routesForRole(){ return State.role === 'student' ? STUDENT_ROUTES : ROUTES; }
 
 /* ========================================================================
@@ -823,7 +817,6 @@ function routesForRole(){ return State.role === 'student' ? STUDENT_ROUTES : ROU
 ======================================================================== */
 $('#ri-teacher').innerHTML = ICONS.user;
 $('#ri-student').innerHTML = ICONS.library;
-$('#ri-admin').innerHTML = ICONS.shield;
 $('#topbar-search-icon').innerHTML = ICONS.search;
 $('#hamburger-btn').innerHTML = ico('menu');
 let pendingRole = null;
@@ -856,8 +849,8 @@ function enterApp(){
 }
 
 function updateRoleUI(){
-  const names = {teacher:'Teacher', student:'Student', admin:'Administrator'};
-  const initials = {teacher:'T', student:'S', admin:'A'};
+  const names = {teacher:'Teacher', student:'Student'};
+  const initials = {teacher:'T', student:'S'};
   $('#sb-role-name').textContent = names[State.role];
   $('#sb-role-avatar').textContent = initials[State.role];
 }
@@ -950,7 +943,6 @@ VIEWS.overview = function(){
   const roleIntro = {
     teacher:'Here is a snapshot of your lectures, assignments and pending evaluations.',
     student:'Here is a snapshot of your lectures, results and feedback.',
-    admin:'Here is a platform-wide snapshot of the curriculum.',
   }[State.role];
 
   const statCards = [
@@ -1973,7 +1965,7 @@ VIEWS.generator = function(){
     return `
       <div class="section-title">Assignment Generator</div>
       <div class="section-sub">Generate draft assignments from a lecture's existing content.</div>
-      <div class="info-banner">${ico('shield')}<div>This tool is available to teachers and administrators.</div></div>`;
+      <div class="info-banner">${ico('shield')}<div>This tool is available to teachers.</div></div>`;
   }
   const lectures = load(SK.lectures, []);
   const genConfigured = AIAssignmentGenService.isConfigured();
