@@ -8,6 +8,8 @@ services:
     startCommand: npm start
     healthCheckPath: /health
     envVars:
+      - key: GEMINI_API_KEY
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: ALLOWED_ORIGINS

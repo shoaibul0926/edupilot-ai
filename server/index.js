@@ -5,7 +5,7 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const { recognizeImages, terminateWorker } = require('./lib/ocr');
 const { gradeWithHeuristics } = require('./lib/grading');
-const { isClaudeConfigured, evaluateWithClaude, generateWithClaude, generateLessonPlanWithClaude, analyzeMistakesWithClaude, discoverResourcesWithClaude, generateOtherMaterialWithClaude } = require('./lib/claude');
+const { isAIConfigured, evaluate, generate, generateLessonPlan, analyzeMistakes, discoverResources, generateOtherMaterial } = require('./lib/ai');
 
 const app = express();
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
@@ -42,7 +42,7 @@ const aiLimiter = rateLimit({
 });
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, mode: isClaudeConfigured() ? 'claude-vision' : 'tesseract-heuristic' });
+  res.json({ ok: true, mode: isAIConfigured() ? (process.env.GEMINI_API_KEY ? 'gemini-vision' : 'claude-vision') : 'tesseract-heuristic' });
 });
 
 // Matches the contract in ../EVALUATION_BACKEND.md
@@ -60,8 +60,8 @@ app.post('/evaluate', aiLimiter, upload.array('images'), async (req, res) => {
   if (!files.length) return res.status(400).send('At least one image is required in the `images` field.');
 
   try {
-    if (isClaudeConfigured()) {
-      const result = await evaluateWithClaude(payload, files);
+    if (isAIConfigured()) {
+      const result = await evaluate(payload, files);
       return res.json(result);
     }
     const ocrResults = await recognizeImages(files.map(f => f.buffer));
@@ -80,14 +80,14 @@ app.post('/evaluate', aiLimiter, upload.array('images'), async (req, res) => {
 // is expected to use its own built-in deterministic demo generator instead
 // (see AIService.generateAssignmentQuestions in index.html).
 app.post('/generate-assignment', aiLimiter, async (req, res) => {
-  if (!isClaudeConfigured()) {
+  if (!isAIConfigured()) {
     return res.status(501).json({
       errorCode: 'NOT_CONFIGURED',
       message: 'No ANTHROPIC_API_KEY is set on this server, so real question generation is unavailable. The frontend will fall back to its built-in demo generator.',
     });
   }
   try {
-    const result = await generateWithClaude(req.body || {});
+    const result = await generate(req.body || {});
     return res.json(result);
   } catch (err) {
     console.error(err);
@@ -101,14 +101,14 @@ app.post('/generate-assignment', aiLimiter, async (req, res) => {
 // deterministic transform, so without a configured model this reports
 // NOT_CONFIGURED honestly instead of fabricating a plan.
 app.post('/generate-lesson-plan', aiLimiter, async (req, res) => {
-  if (!isClaudeConfigured()) {
+  if (!isAIConfigured()) {
     return res.status(501).json({
       errorCode: 'NOT_CONFIGURED',
       message: 'No ANTHROPIC_API_KEY is set on this server, so real lesson plan generation is unavailable. The frontend will fall back to its built-in demo generator.',
     });
   }
   try {
-    const result = await generateLessonPlanWithClaude(req.body || {});
+    const result = await generateLessonPlan(req.body || {});
     return res.json(result);
   } catch (err) {
     console.error(err);
@@ -138,14 +138,14 @@ app.post('/analyze-mistakes', aiLimiter, upload.array('files'), async (req, res)
     return res.status(400).send('At least one file is required in the `files` field for non-text submissions.');
   }
 
-  if (!isClaudeConfigured()) {
+  if (!isAIConfigured()) {
     return res.status(501).json({
       errorCode: 'NOT_CONFIGURED',
       message: 'No ANTHROPIC_API_KEY is set on this server, so AI mistake analysis is unavailable. There is no local heuristic fallback for open-ended analysis (unlike grading against an approved question set) — configure a key to enable it.',
     });
   }
   try {
-    const result = await analyzeMistakesWithClaude(payload, files);
+    const result = await analyzeMistakes(payload, files);
     return res.json(result);
   } catch (err) {
     console.error(err);
@@ -160,14 +160,14 @@ app.post('/analyze-mistakes', aiLimiter, upload.array('files'), async (req, res)
 // honestly instead of fabricating generic results. (The frontend still has
 // its own simpler, clearly-labeled demo template so the UI never dead-ends.)
 app.post('/discover-resources', aiLimiter, async (req, res) => {
-  if (!isClaudeConfigured()) {
+  if (!isAIConfigured()) {
     return res.status(501).json({
       errorCode: 'NOT_CONFIGURED',
       message: 'No ANTHROPIC_API_KEY is set on this server, so AI resource curation is unavailable. The frontend will fall back to its built-in demo template.',
     });
   }
   try {
-    const result = await discoverResourcesWithClaude(req.body || {});
+    const result = await discoverResources(req.body || {});
     return res.json(result);
   } catch (err) {
     console.error(err);
@@ -181,14 +181,14 @@ app.post('/discover-resources', aiLimiter, async (req, res) => {
 // lecture content, not a deterministic transform, so without a configured
 // model this reports NOT_CONFIGURED honestly instead of fabricating one.
 app.post('/generate-material', aiLimiter, async (req, res) => {
-  if (!isClaudeConfigured()) {
+  if (!isAIConfigured()) {
     return res.status(501).json({
       errorCode: 'NOT_CONFIGURED',
       message: 'No ANTHROPIC_API_KEY is set on this server, so real material generation is unavailable. The frontend will fall back to its built-in demo generator.',
     });
   }
   try {
-    const result = await generateOtherMaterialWithClaude(req.body || {});
+    const result = await generateOtherMaterial(req.body || {});
     return res.json(result);
   } catch (err) {
     console.error(err);
@@ -207,7 +207,7 @@ app.use((err, req, res, next) => {
 
 const server = app.listen(PORT, () => {
   console.log(`EduPilot AI reference backend listening on http://127.0.0.1:${PORT}`);
-  console.log(`Mode: ${isClaudeConfigured() ? 'Claude vision/text AI (ANTHROPIC_API_KEY set)' : 'Local OCR + heuristic grading only (no ANTHROPIC_API_KEY — see README.md)'}`);
+  console.log(`Mode: ${process.env.GEMINI_API_KEY ? 'Gemini vision/text AI (GEMINI_API_KEY set)' : isAIConfigured() ? 'Claude vision/text AI (ANTHROPIC_API_KEY set)' : 'Local OCR + heuristic grading only (no provider key — see README.md)'}`);
 });
 
 async function shutdown() {
