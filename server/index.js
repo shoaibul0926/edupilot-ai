@@ -8,6 +8,13 @@ const { gradeWithHeuristics } = require('./lib/grading');
 const { isAIConfigured, evaluate, generate, generateLessonPlan, analyzeMistakes, discoverResources, generateOtherMaterial } = require('./lib/ai');
 
 const app = express();
+// Render (and most PaaS hosts) sit behind a single reverse proxy that sets
+// X-Forwarded-For. Without this, express-rate-limit throws
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR on every request through aiLimiter
+// below — silently hanging every AI-backed route while /health (no rate
+// limiter) keeps working, which is exactly what made this look like a slow
+// AI call instead of a crashed request. `1` trusts exactly one hop.
+app.set('trust proxy', 1);
 const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
 const PORT = process.env.PORT || 8787;
 
