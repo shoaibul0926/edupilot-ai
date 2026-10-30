@@ -39,20 +39,45 @@ function isTransient(err) {
   return /503|429|UNAVAILABLE|overloaded|high demand|too many requests|gateway timeout|ETIMEDOUT|timeout/i.test(msg);
 }
 
+// This free-tier key has a low requests-per-minute quota — 429s showed up
+// even under light, single-user testing. In a live demo, several
+// teachers/students in the room could trigger AI calls within the same
+// few seconds, which would multiply 429s. Serialize every Gemini call
+// through one queue with a minimum gap between calls, so concurrent demo
+// usage gets spaced out instead of all landing in the same rate-limit
+// window. This doesn't change latency for a single caller much (requests
+// already take several seconds), but keeps the server from being its own
+// worst enemy under multi-user load.
+const MIN_GAP_MS = 2500;
+let queueTail = Promise.resolve();
+let lastCallAt = 0;
+function scheduled(fn) {
+  const result = queueTail.then(async () => {
+    const wait = MIN_GAP_MS - (Date.now() - lastCallAt);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    lastCallAt = Date.now();
+    return fn();
+  });
+  queueTail = result.catch(() => {}); // one job's failure must not jam the queue for the next
+  return result;
+}
+
 async function generateJson(parts) {
-  const ATTEMPTS = 3;
+  const ATTEMPTS = 4;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {
-      const ai = client();
-      const response = await ai.models.generateContent({
-        model: MODEL,
-        contents: [{ role: 'user', parts }],
-        config: { responseMimeType: 'application/json' },
+      return await scheduled(async () => {
+        const ai = client();
+        const response = await ai.models.generateContent({
+          model: MODEL,
+          contents: [{ role: 'user', parts }],
+          config: { responseMimeType: 'application/json' },
+        });
+        return JSON.parse(response.text);
       });
-      return JSON.parse(response.text);
     } catch (err) {
       if (attempt === ATTEMPTS || !isTransient(err)) throw err;
-      await new Promise(r => setTimeout(r, attempt * 1000));
+      await new Promise(r => setTimeout(r, attempt * 1500));
     }
   }
 }
