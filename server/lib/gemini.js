@@ -9,20 +9,52 @@ function isGeminiConfigured() {
   return !!(process.env.GEMINI_API_KEY || '').trim();
 }
 
+// Root cause of the original "hang": top-level `timeout`/`maxRetries` on
+// GoogleGenAI are not real SDK options (silently ignored) — the real knobs
+// live under httpOptions. The SDK's actual default is retryOptions.attempts
+// = 5, each with its own ~60s timeout, so one overloaded/503/429 call could
+// take up to 5 minutes before failing — indistinguishable from a hang to
+// Render, curl, or a browser waiting on it. We bound each HTTP attempt to
+// 15s and disable the SDK's internal retry (attempts: 1), doing our own
+// bounded retry in generateJson below instead, so failures surface in
+// seconds, not minutes.
+//
+// Model choice: gemini-3.8-flash (the newest flash model) hit a hard 429
+// "Too Many Requests" quota wall and ~50% 503 "high demand" rate in testing
+// on this API key, consistent with a tight free-tier quota on the newest
+// model. gemini-3.5-flash tested far more available (still ~50% transient
+// 503s under load, but fails/succeeds in 3-5s, not minutes) — combined with
+// our own retry below, this is the more demo-reliable default.
 function client() {
-  return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  return new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+    httpOptions: { timeout: 15000, retryOptions: { attempts: 1 } },
+  });
 }
 
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+
+function isTransient(err) {
+  const msg = (err && err.message) || '';
+  return /503|429|UNAVAILABLE|overloaded|high demand|too many requests|gateway timeout|ETIMEDOUT|timeout/i.test(msg);
+}
 
 async function generateJson(parts) {
-  const ai = client();
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: [{ role: 'user', parts }],
-    config: { responseMimeType: 'application/json' },
-  });
-  return JSON.parse(response.text);
+  const ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    try {
+      const ai = client();
+      const response = await ai.models.generateContent({
+        model: MODEL,
+        contents: [{ role: 'user', parts }],
+        config: { responseMimeType: 'application/json' },
+      });
+      return JSON.parse(response.text);
+    } catch (err) {
+      if (attempt === ATTEMPTS || !isTransient(err)) throw err;
+      await new Promise(r => setTimeout(r, attempt * 1000));
+    }
+  }
 }
 
 function imagePart(f) {
